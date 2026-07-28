@@ -69,3 +69,8 @@ fastlane/test_output
 xcuserdata/
 *.xcuserstate
 **/xcshareddata/WorkspaceSettings.xcsettings
+
+# XcodeGen 生成物——project.yml 才是工程的唯一真相来源
+*.xcodeproj
+DerivedData/
+build/
