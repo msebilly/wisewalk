@@ -489,7 +489,8 @@ import Testing
     #expect(ScheduleRule(rawValue: "weekdays:abc") == .daily)
 }
 
-@Test func 计量方式非法值退化为计数() {
+@Test func 计量方式非法值解析为空() {
+    // 退化为 .count 发生在 PracticeItem.measureType 的读取门面上，不在这里
     #expect(MeasureType(rawValue: "unknown") == nil)
 }
 ```
@@ -615,13 +616,18 @@ git commit -m "feat: 领域枚举与排班规则编解码"
 
 ---
 
-### Task 4: PracticeSession —— append-only 流水
+### Task 4: PracticeSession 与 PracticeItem —— 互相引用的一对
+
+这两个实体**必须同时落地**：`PracticeSession.item` 指向 `PracticeItem`，
+而 `PracticeItem.sessions` 又用 `@Relationship(inverse: \PracticeSession.item)` 指回来。
+双向关系拆不开，单独提交任何一个都编译不过。
 
 **Files:**
 - Create: `Sources/Models/PracticeSession.swift`
-- Test: 本任务只需编译通过，行为测试在 Task 7 建好容器后一并进行
+- Create: `Sources/Models/PracticeItem.swift`
+- Test: 本任务只需编译通过，行为测试在 Task 6 建好容器后一并进行
 
-- [ ] **Step 1: 实现**
+- [ ] **Step 1: 实现 PracticeSession**
 
 `Sources/Models/PracticeSession.swift`：
 
@@ -707,27 +713,7 @@ final class PracticeSession {
 > 若用 `Date()`，默认值会在 Schema 构建时定格成某个看起来很合理的时刻，
 > 真出了「没赋值」的 bug 反而看不出来。
 
-- [ ] **Step 2: 确认编译通过**
-
-Run: `cd /Users/bill/Documents/GitHub/wisewalk && make build`
-Expected: 无 error，命令退出码 0
-
-- [ ] **Step 3: 提交**
-
-```bash
-cd /Users/bill/Documents/GitHub/wisewalk
-git add Sources/Models/PracticeSession.swift
-git commit -m "feat: PracticeSession append-only 流水实体"
-```
-
----
-
-### Task 5: PracticeItem —— 定课项
-
-**Files:**
-- Create: `Sources/Models/PracticeItem.swift`
-
-- [ ] **Step 1: 实现**
+- [ ] **Step 2: 实现 PracticeItem**
 
 `Sources/Models/PracticeItem.swift`：
 
@@ -826,22 +812,22 @@ final class PracticeItem {
 }
 ```
 
-- [ ] **Step 2: 确认编译通过**
+- [ ] **Step 3: 确认编译通过**
 
 Run: `cd /Users/bill/Documents/GitHub/wisewalk && make build`
 Expected: 无 error，命令退出码 0
 
-- [ ] **Step 3: 提交**
+- [ ] **Step 4: 提交**
 
 ```bash
 cd /Users/bill/Documents/GitHub/wisewalk
-git add Sources/Models/PracticeItem.swift
-git commit -m "feat: PracticeItem 定课项实体"
+git add Sources/Models/PracticeSession.swift Sources/Models/PracticeItem.swift
+git commit -m "feat: PracticeSession 与 PracticeItem 实体"
 ```
 
 ---
 
-### Task 6: DaySnapshot —— 当日应做清单快照
+### Task 5: DaySnapshot —— 当日应做清单快照
 
 **Files:**
 - Create: `Sources/Models/DaySnapshot.swift`
@@ -907,7 +893,7 @@ git commit -m "feat: DaySnapshot 当日清单快照实体"
 
 ---
 
-### Task 7: 容器装配与 CloudKit 约束守卫
+### Task 6: 容器装配与 CloudKit 约束守卫
 
 design-spec §4.6 列了四条 CloudKit 硬约束。写进文档里靠人眼盯是守不住的——半年后加个字段谁还记得。这个任务把四条约束变成会失败的测试。
 
@@ -1191,7 +1177,7 @@ git commit -m "feat: 容器装配与 CloudKit 约束守卫测试"
 
 ---
 
-### Task 8: LedgerMath —— 求和与圆满判定
+### Task 7: LedgerMath —— 求和与圆满判定
 
 **Files:**
 - Create: `Sources/Core/LedgerMath.swift`
@@ -1316,7 +1302,7 @@ git commit -m "feat: LedgerMath 账本求和与圆满判定"
 
 ---
 
-### Task 9: DeviceIdentity —— 流水的落款
+### Task 8: DeviceIdentity —— 流水的落款
 
 诊断页要回答「这笔账是哪台设备记的」。iOS 16 起 `UIDevice.current.name` 不再返回用户起的名字（无特殊 entitlement 时只给通用名），所以用「机型 + 本机短码」拼一个稳定标识。
 
@@ -1418,7 +1404,7 @@ git commit -m "feat: DeviceIdentity 设备落款"
 
 ---
 
-### Task 10: DayLedger —— 唯一写入口
+### Task 9: DayLedger —— 唯一写入口
 
 「只增不改不删」这条纪律，如果散落在各个界面里就守不住。所有写操作收口到这一个类型。
 
@@ -1767,7 +1753,7 @@ git commit -m "feat: DayLedger 账本唯一写入口"
 
 ---
 
-### Task 11: 快照与圆满判定
+### Task 10: 快照与圆满判定
 
 **Files:**
 - Modify: `Sources/Store/DayLedger.swift`（在 `// MARK: - 读` 之后追加新的 `// MARK: - 快照与圆满` 区段）
