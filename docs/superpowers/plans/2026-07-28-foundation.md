@@ -169,15 +169,19 @@ build: gen
 	xcodebuild build -project $(PROJ) -scheme WiseWalk -destination '$(DEST)' -quiet
 
 test: gen
+	@mkdir -p build
 	@set -o pipefail; \
 	xcodebuild test -project $(PROJ) -scheme WiseWalk -destination '$(DEST)' 2>&1 \
-		| tee /tmp/wisewalk-test.log \
+		| tee build/wisewalk-test.log \
 		| grep -E "✔|✘|error:|Executed|TEST (SUCCEEDED|FAILED)" || true
-	@grep -q "TEST SUCCEEDED" /tmp/wisewalk-test.log
+	@grep -q "TEST SUCCEEDED" build/wisewalk-test.log
 
 clean:
 	rm -rf $(PROJ) build .build DerivedData
 ```
+
+> 最后那行 `grep -q` 是这道门的关键：`xcodebuild` 即使测试失败也可能返回 0，
+> 光看退出码会得到永远是绿的假绿灯。已实测：测试失败时 `make test` 退出码为 2。
 
 - [ ] **Step 3: 写 App 入口与占位视图**
 
@@ -362,9 +366,6 @@ import Foundation
 /// 所以每笔流水都随身携带 tzOffsetMinutes，而 dayKey 一旦写入就永不重算——
 /// 用户从北京飞到温哥华，昨天的功课不该跳到前天去。
 enum DayKey {
-    /// 一日起始小时的合法范围。默认 0（午夜），修行人常设 3（凌晨三点）。
-    static let allowedDayStartHours: ClosedRange<Int> = 0...6
-
     private static let utcCalendar: Calendar = {
         var c = Calendar(identifier: .gregorian)
         c.timeZone = TimeZone(secondsFromGMT: 0)!
