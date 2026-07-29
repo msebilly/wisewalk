@@ -47,6 +47,9 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     let a = try store.create(from: TemplateCatalog.template(key: "chanting")!)
     let b = try store.create(from: TemplateCatalog.template(key: "mantra")!)
     let c = try store.create(from: TemplateCatalog.template(key: "sutra")!)
+    // `as [Int]` 不是多余的：`#expect` 把 `==` 展开成泛型的 `__checkBinaryOperation`，
+    // 而这里 `==` 两边都是数组字面量，`IndexSet` 与 `IndexPath` 同样
+    // `ExpressibleByArrayLiteral<Int>`，泛型参数在三者之间歧义，编译不过。
     #expect([a.sortOrder, b.sortOrder, c.sortOrder] as [Int] == [0, 1, 2])
     #expect(try store.activeItems().map(\.name) == ["念佛", "持咒", "诵经"])
 }
