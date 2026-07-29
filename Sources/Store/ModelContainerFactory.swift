@@ -39,6 +39,23 @@ enum ModelContainerFactory {
         )
     }
 
+    /// 把 `url` 排除出 iCloud / 本地备份。**排除目录时其内容一并排除**，
+    /// 这正是草稿库要单独占一个子目录的原因——SwiftData 的一个 store
+    /// 落盘其实是 `.store` / `-wal` / `-shm` 三个文件，只排除主文件是漏的。
+    ///
+    /// 为什么非做不可：草稿库若进了备份，就会出现「跨时间的重复记账」——
+    /// 备份发生在做完功课**之前**，此刻草稿还在；做完之后草稿删了、流水写了，
+    /// 但这次改动还没被备份到。用户换机一恢复，拿到的是「有旧草稿、没有那笔流水」
+    /// 的状态，`DraftRecovery` 启动时把它捞出来弹「要恢复吗」，
+    /// 用户点确认 → 同一笔功课记两遍。
+    /// 这与草稿同步出去是同一个故障，只是把「跨设备」换成了「跨时间」。
+    static func excludeFromBackup(_ url: URL) throws {
+        var url = url
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try url.setResourceValues(values)
+    }
+
     /// 生产用：本地落盘，两个独立的 store 文件。
     ///
     /// 第 3 卷「同步」只需把 `synced` 那条的 `cloudKitDatabase` 改成 `.automatic`
@@ -46,17 +63,26 @@ enum ModelContainerFactory {
     ///
     /// 落盘路径写死而不是用默认值：两个 configuration 必须落在两个不同文件上，
     /// 靠默认命名去猜是在赌 SwiftData 的实现细节。
-    static func onDisk() throws -> ModelContainer {
-        let dir = URL.applicationSupportDirectory
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    ///
+    /// 账本库**要**进备份——那是用户的功课历史。草稿库**不**进（见 `excludeFromBackup`）。
+    ///
+    /// `baseDirectory` 有默认值，生产调用处不必传；开个口子是为了让测试
+    /// 能指向临时目录，从而真正验证「草稿库确实落在被排除的子目录里」——
+    /// 只测 `excludeFromBackup` 这个函数本身，证明不了 `onDisk` 真的调了它。
+    static func onDisk(baseDirectory: URL = URL.applicationSupportDirectory) throws -> ModelContainer {
+        let localDir = baseDirectory.appending(path: "LocalOnly", directoryHint: .isDirectory)
+        let fm = FileManager.default
+        try fm.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        try fm.createDirectory(at: localDir, withIntermediateDirectories: true)
+        try excludeFromBackup(localDir)
         return try ModelContainer(
             for: fullSchema,
             configurations:
                 ModelConfiguration("synced", schema: syncedSchema,
-                                   url: dir.appendingPathComponent("WiseWalk.store"),
+                                   url: baseDirectory.appendingPathComponent("WiseWalk.store"),
                                    cloudKitDatabase: .none),
                 ModelConfiguration("localOnly", schema: localSchema,
-                                   url: dir.appendingPathComponent("WiseWalkLocal.store"),
+                                   url: localDir.appendingPathComponent("WiseWalkLocal.store"),
                                    cloudKitDatabase: .none)
         )
     }

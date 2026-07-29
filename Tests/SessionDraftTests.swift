@@ -69,6 +69,31 @@ import Foundation
 }
 
 @MainActor
+@Test func 落盘时草稿库与账本库分家且草稿库不进备份() throws {
+    // 账本库要进备份——那是用户的功课历史。草稿库不进：
+    // 备份发生在做完功课之前，恢复到新机上就成了「有旧草稿、没那笔流水」，
+    // DraftRecovery 会把它捞出来让用户把同一笔再记一遍。
+    // 这与草稿同步出去是同一个故障，只是把「跨设备」换成了「跨时间」。
+    let base = URL.temporaryDirectory.appending(path: "wisewalk-\(UUID().uuidString)",
+                                                directoryHint: .isDirectory)
+    defer { try? FileManager.default.removeItem(at: base) }
+    _ = try ModelContainerFactory.onDisk(baseDirectory: base)
+
+    let ledgerStore = base.appendingPathComponent("WiseWalk.store")
+    let localDir = base.appending(path: "LocalOnly", directoryHint: .isDirectory)
+    let draftStore = localDir.appendingPathComponent("WiseWalkLocal.store")
+
+    #expect(FileManager.default.fileExists(atPath: ledgerStore.path), "账本库没落在预期路径")
+    #expect(FileManager.default.fileExists(atPath: draftStore.path), "草稿库没落在预期路径")
+    #expect(try localDir.resourceValues(forKeys: [.isExcludedFromBackupKey])
+                .isExcludedFromBackup == true,
+            "草稿库目录没被排除出备份")
+    #expect(try ledgerStore.resourceValues(forKeys: [.isExcludedFromBackupKey])
+                .isExcludedFromBackup != true,
+            "账本库被排除出了备份——那是用户的功课历史，必须备份")
+}
+
+@MainActor
 @Test func 草稿携带预生成的流水编号() throws {
     // §4.5 第 2 条。提交时拿它调 record(id:)，重放也只会记一笔。
     let ctx = ModelContext(try ModelContainerFactory.inMemory())
