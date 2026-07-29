@@ -117,7 +117,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     try vm.start(at: start, timeZone: 北京时间)
     for _ in 0..<108 { try vm.tap(at: start) }
 
-    let s = try vm.finish(at: end, timeZone: 北京时间)
+    let s = try vm.finish(at: end)
 
     #expect(s?.amount == 108)
     #expect(s?.source == .counter)
@@ -132,7 +132,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     let (vm, drafts, ledger, item) = try makeCounter()
     let now = 北京(7, 28, 9, 0)
     try vm.start(at: now, timeZone: 北京时间)
-    let s = try vm.finish(at: now, timeZone: 北京时间)
+    let s = try vm.finish(at: now)
     #expect(s == nil)
     #expect(try ledger.sessions(on: 20260728, itemID: item.id).isEmpty)
     #expect(try drafts.pendingDrafts().isEmpty, "空草稿也要清掉，免得下次启动弹恢复窗")
@@ -144,8 +144,8 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     let now = 北京(7, 28, 9, 0)
     try vm.start(at: now, timeZone: 北京时间)
     try vm.tap(at: now)
-    try vm.finish(at: now, timeZone: 北京时间)
-    let second = try vm.finish(at: now, timeZone: 北京时间)
+    try vm.finish(at: now)
+    let second = try vm.finish(at: now)
     #expect(second == nil, "第二次结束应当什么也不做")
     #expect(try ledger.total(on: 20260728, itemID: item.id) == 1)
 }
@@ -196,10 +196,39 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
 @Test func 跨零点结束时记在开始那天() throws {
     // 夜课念到零点之后。dayKey 由 finish 那一刻推导，
     // 若用户设了「一日起始 3:00」，零点半仍算前一天。
+    //
+    // 「一日起始」是在 start 时传的：它是**设置**，进这个页面时是什么就是什么，
+    // finish 不再单收，省得两处传得不一致（见 dayStartHour 属性的注释）。
     let (vm, _, ledger, item) = try makeCounter()
-    try vm.start(at: 北京(7, 28, 23, 40), timeZone: 北京时间)
+    try vm.start(at: 北京(7, 28, 23, 40), dayStartHour: 3, timeZone: 北京时间)
     for _ in 0..<10 { try vm.tap(at: 北京(7, 28, 23, 50)) }
-    try vm.finish(at: 北京(7, 29, 0, 30), dayStartHour: 3, timeZone: 北京时间)
+    try vm.finish(at: 北京(7, 29, 0, 30))
     #expect(try ledger.total(on: 20260728, itemID: item.id) == 10, "设了凌晨 3 点起始，零点半该算 28 号")
+    #expect(try ledger.total(on: 20260729, itemID: item.id) == 0)
+}
+
+@MainActor
+@Test func 今日已记与流水落在同一天() throws {
+    // 钉住 Q3：committedTotal 算的那天，必须就是流水最终落的那天。
+    // 若「一日起始」与时区两处各传各的，屏幕上的 dayTotal 会成为一个
+    // 哪一天都对不上的游离数字——账本没错，错的是显示。
+    //
+    // 这里用最容易露馅的构造：北京 7/29 00:30、一日起始 3 点。
+    // 只要有一处漏了设置（退回 dayStartHour 0 或本机时区），两边就分家。
+    let (vm, _, ledger, item) = try makeCounter()
+    let 起 = 北京(7, 28, 23, 40)
+    try ledger.record(item: item, amount: 300, source: .counter,
+                      startedAt: 起, at: 起, dayStartHour: 3, timeZone: 北京时间)
+    try vm.start(at: 起, dayStartHour: 3, timeZone: 北京时间)
+    #expect(vm.committedTotal == 300, "进来时就该看见今天已记的 300")
+
+    for _ in 0..<108 { try vm.tap(at: 北京(7, 28, 23, 50)) }
+    #expect(vm.dayTotal == 408)
+
+    try vm.finish(at: 北京(7, 29, 0, 30))
+
+    #expect(vm.dayTotal == 408, "结束后显示的数不该跳变")
+    #expect(try ledger.total(on: 20260728, itemID: item.id) == 408,
+            "屏幕上的 408 必须就是账本上那一天的 408")
     #expect(try ledger.total(on: 20260729, itemID: item.id) == 0)
 }
