@@ -1349,9 +1349,9 @@ import Foundation
     #expect(code.allSatisfy { allowed.contains($0) })
 }
 
-@Test func 显示名包含机型与短码() {
+@Test func 显示名包含机型与短码() async {
     let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!
-    let name = DeviceIdentity.displayName(defaults: defaults)
+    let name = await DeviceIdentity.displayName(defaults: defaults)
     #expect(name.contains("·"))
     let parts = name.split(separator: "·")
     #expect(parts.count == 2)
@@ -1392,6 +1392,10 @@ enum DeviceIdentity {
     }
 
     /// 形如 `iPhone·A3K9`
+    ///
+    /// `UIDevice` 在 SDK 里标了 `NS_SWIFT_UI_ACTOR`，严格并发下取机型必须在主线程，
+    /// 所以这里如实标 `@MainActor` 而不是绕开。调用方 `DayLedger` 本就是 `@MainActor`。
+    @MainActor
     static func displayName(defaults: UserDefaults = .standard) -> String {
         "\(UIDevice.current.model)·\(shortCode(defaults: defaults))"
     }
