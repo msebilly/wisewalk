@@ -304,8 +304,15 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     #expect(staged.amount == 108)
     #expect(ctx.hasChanges, "stage 之后应当还有未落盘的改动")
 
+    // 必须另开一个 context 才问得出「进没进 store」：FetchDescriptor.includePendingChanges
+    // 默认为 true，同一个 ctx 上查会把未落盘的 insert 也算进去，什么也证明不了。
+    #expect(try ModelContext(ctx.container).fetch(FetchDescriptor<PracticeSession>()).isEmpty,
+            "stage 只是暂存，别的 context 不该看见这笔")
+
     try ctx.save()
     #expect(try ledger.total(on: 20260728, itemID: item.id) == 108)
+    #expect(try ModelContext(ctx.container).fetch(FetchDescriptor<PracticeSession>()).count == 1,
+            "save 之后这笔才真正落进 store")
 }
 
 @MainActor
