@@ -117,6 +117,58 @@ final class DayLedger {
         try fetch(sessionID: sessionID) != nil
     }
 
+    // MARK: - 快照与圆满
+
+    /// 取某天的应做清单快照；不存在则依 `activeItems` 生成并落库。
+    ///
+    /// **已存在的快照绝不改写。** 用户今天把目标从 1000 调到 3000，
+    /// 上个月那些标着圆满的日子不能因此变回未完成——
+    /// 那等于告诉他过去三十天白做了。
+    ///
+    /// `DaySnapshot` 没有唯一约束（CloudKit 不支持），
+    /// 两台设备可能各生成一条同日快照，故按 `(createdAt, id)` 确定性地取最早一条。
+    func snapshot(for dayKey: Int, activeItems: [PracticeItem]) throws -> DaySnapshot {
+        let key = dayKey
+        let existing = try context.fetch(
+            FetchDescriptor<DaySnapshot>(predicate: #Predicate { $0.dayKey == key })
+        )
+        if let earliest = existing.min(by: {
+            ($0.createdAt, $0.id.uuidString) < ($1.createdAt, $1.id.uuidString)
+        }) {
+            return earliest
+        }
+
+        let required = activeItems.filter { !$0.isArchived }
+        var goals: [String: Int] = [:]
+        for item in required {
+            if let goal = item.dailyGoal, goal > 0 {
+                goals[item.id.uuidString] = goal
+            }
+        }
+
+        let snapshot = DaySnapshot(
+            dayKey: dayKey,
+            requiredItemIDs: required.map(\.id),
+            goals: goals
+        )
+        context.insert(snapshot)
+        try context.save()
+        return snapshot
+    }
+
+    /// 依快照判定完成状态。**永不按当前设置实时重算。**
+    func fulfillment(
+        of itemID: UUID,
+        on dayKey: Int,
+        snapshot: DaySnapshot
+    ) throws -> FulfillmentState {
+        guard snapshot.requiredItemIDs.contains(itemID) else { return .notRequired }
+        let total = try total(on: dayKey, itemID: itemID)
+        return LedgerMath.isFulfilled(total: total, goal: snapshot.goals[itemID.uuidString])
+            ? .fulfilled
+            : .pending
+    }
+
     private func fetch(sessionID: UUID) throws -> PracticeSession? {
         let target = sessionID
         var descriptor = FetchDescriptor<PracticeSession>(
