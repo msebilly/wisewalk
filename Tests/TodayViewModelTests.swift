@@ -124,19 +124,75 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     // 藏起来的话今日页会说「圆满」而月历会说「没圆满」。
     let (vm, items, _, _) = try makeToday()
     let 念佛 = try items.create(from: TemplateCatalog.template(key: "chanting")!)
+    let 持咒 = try items.create(from: TemplateCatalog.template(key: "mantra")!)
     let 拜佛 = try items.create(from: TemplateCatalog.template(key: "prostrate")!)
     let now = 北京(7, 28, 9, 0)
     try vm.reload(now: now, timeZone: 北京时间)
-    #expect(vm.rows.count == 2, "前提：上午两项都在")
+    #expect(vm.rows.count == 3, "前提：上午三项都在")
 
-    try items.archive(拜佛, at: 北京(7, 28, 12, 0))
+    // 归档哪一项**不能写死**。第二次 reload 走 merge，`requiredItemIDs` 按 uuidString 排；
+    // 若归档的那项碰巧 uuidString 最大，删掉排序它照样落在末尾，
+    // 「已归档的排到最后」这条断言就有三分之一的运行什么都测不出来。
+    // 取 uuidString **最小**的那项来归档：没有排序时它必然排在最前，绝不可能在末尾。
+    let 待归档 = [念佛, 持咒, 拜佛].min { $0.id.uuidString < $1.id.uuidString }!
+    try items.archive(待归档, at: 北京(7, 28, 12, 0))
     try vm.reload(now: 北京(7, 28, 13, 0), timeZone: 北京时间)
 
-    #expect(vm.rows.count == 2, "当日快照已经登记了拜佛，藏起来会与月历口径打架")
-    let 拜 = vm.rows.first { $0.itemID == 拜佛.id }
-    #expect(拜?.isArchived == true, "要标注出来，让用户知道它明天就不出现了")
-    #expect(vm.rows.first { $0.itemID == 念佛.id }?.isArchived == false)
-    #expect(vm.rows.last?.itemID == 拜佛.id, "已归档的排到最后")
+    #expect(vm.rows.count == 3, "当日快照已经登记了它，藏起来会与月历口径打架")
+    #expect(vm.rows.first { $0.itemID == 待归档.id }?.isArchived == true,
+            "要标注出来，让用户知道它明天就不出现了")
+    #expect(vm.rows.filter { !$0.isArchived }.count == 2)
+    #expect(vm.rows.last?.itemID == 待归档.id, "已归档的排到最后")
+}
+
+@MainActor
+@Test func 快照有ID而定课还没同步下来时不许报圆满() throws {
+    // CloudKit 把 DaySnapshot 与 PracticeItem 当两种独立记录同步，
+    // 不保证到达顺序，也没有引用完整性。换新机、重装后首次启动，
+    // 完全可能快照先到、定课未到。
+    //
+    // 把取不到的那项静默跳过、再拿 rows 推三态，就会：念佛达标了、
+    // 另一项本机根本没有 → rows 全达标 → 报「今日圆满」。
+    // 账本一声没丢（补齐后自愈），但报告层替用户宣布了他没做到的事。
+    let (vm, items, ledger, ctx) = try makeToday()
+    let 念佛 = try items.create(from: TemplateCatalog.template(key: "chanting")!)
+    let now = 北京(7, 28, 9, 0)
+    try ledger.record(item: 念佛, amount: 1, source: .counter,
+                      startedAt: now, at: now, timeZone: 北京时间)
+
+    // 手造一条「多一项、而那项本机没有」的快照，模拟同步半到。
+    let 幽灵 = UUID()
+    ctx.insert(DaySnapshot(dayKey: 20260728,
+                           requiredItemIDs: [念佛.id, 幽灵],
+                           goals: [:]))
+    try ctx.save()
+
+    try vm.reload(now: now, timeZone: 北京时间)
+
+    #expect(vm.rows.count == 1, "画不出来的那项确实进不了 rows")
+    #expect(vm.unresolvedItemIDs == [幽灵])
+    #expect(vm.requiredCount == 2, "它必须留在分母里")
+    #expect(!vm.isFulfilled, "念佛是达标了，但还有一项本机根本不知道他做没做")
+    #expect(!vm.isRestDay)
+}
+
+@MainActor
+@Test func 一项都没同步下来时是未圆满而不是无课日() throws {
+    // rows 全空。若拿 rows.isEmpty 推「无课」，这一天会被判成
+    // 不计入分母、不中断连续天数——等于替用户抹掉一天的欠账。
+    // §6.8 定义的无课是「**应做集合**为空」，不是「画得出来的那部分为空」。
+    let (vm, _, _, ctx) = try makeToday()
+    ctx.insert(DaySnapshot(dayKey: 20260728,
+                           requiredItemIDs: [UUID(), UUID()],
+                           goals: [:]))
+    try ctx.save()
+
+    try vm.reload(now: 北京(7, 28, 9, 0), timeZone: 北京时间)
+
+    #expect(vm.rows.isEmpty)
+    #expect(vm.requiredCount == 2)
+    #expect(!vm.isRestDay, "应做集合不空就不是无课日")
+    #expect(!vm.isFulfilled)
 }
 
 @MainActor
@@ -151,6 +207,15 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     #expect(vm.dayKey == 20260729)
     #expect(vm.rows.count == 1, "只唠叨到当天为止")
     #expect(vm.rows[0].name == "念佛")
+    // 说明：**没有任何单点变异能打红这一条**，因为「归档的第二天不再出现」
+    // 由两层冗余各自独立保证——`reload` 只取 `activeItems()`，
+    // 而 `DayLedger.plan` 建快照时又 `filter { !$0.isArchived }` 了一次。
+    // 拆掉任意一层，另一层兜住；两层同时拆才红。
+    //
+    // 留着它是对的：这是端到端的可观察行为，本就不该绑死在某一层的实现上。
+    // 但别误以为它在守 `activeItems()` 那一句——那一句真正的看守是
+    // Task 7 的 `排除已归档的定课项`。
+    #expect(vm.unresolvedItemIDs.isEmpty, "第二天的新快照压根不该登记它")
 }
 
 @MainActor
@@ -186,7 +251,13 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
 }
 
 @MainActor
-@Test func 计时类的进度按秒算() throws {
+@Test func 计时类的量在这一层不换算原样以秒进出() throws {
+    // 原名叫「计时类的进度按秒算」，名不副实：`progress` 对计时类与计数类
+    // 是**同一段数学**，实现里没有任何一行「按秒」的逻辑，改名如实。
+    // 分钟↔秒的换算在 Task 18 的 `ItemEditorViewModel.goalDisplay`，不在这一层。
+    //
+    // 它真正独有钉住的是两件事：`measureType` 原样透传（把 `:89` 改成写死 `.count`
+    // 只有这条会红），以及 `total` 不做任何单位换算（谁在这层除以 60，`900` 会变 `15`）。
     let (vm, items, ledger, _) = try makeToday()
     let item = try items.create(name: "打坐", measureType: .duration, unit: "",
                                 dailyGoal: 1800, iconName: "figure.mind.and.body",
