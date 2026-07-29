@@ -21,9 +21,30 @@ final class DraftStore {
     /// 开一份草稿。**同一定课已有草稿时沿用而不是新开一份**——
     /// 否则用户退出计数器再进来就会凭空多出一份，恢复时不知道该信哪个，
     /// 而两份都恢复就是重复记账。
+    ///
+    /// 但沿用有两个前提，任一不成立就把旧草稿丢掉重开：
+    ///
+    /// 1. **量法一致**。`source` 是恢复时的分派键（`DraftRecovery.suggestedAmount`：
+    ///    `.timer` 按 `updatedAt - startedAt` 折秒，其余直接取 `amount`）。用户改过
+    ///    定课的量法之后，旧草稿的 `amount` 与 `startedAt` 在新量法下**每个字段都是错的**：
+    ///    拿一份计时草稿当计数用，恢复时会把几小时时长报成「念了几千声」，
+    ///    用户一点确认就写进只增不减的账本。
+    /// 2. **这笔还没入账**。跨两个 store 文件没有分布式事务，「写流水 + 删草稿」
+    ///    那次 save 只是尽力而为，可能流水落了、草稿没删。启动时 `reconcilePendingDrafts`
+    ///    会清掉这种草稿，但它**只在启动时跑**——用户不重启 App、在同一次会话里又进了
+    ///    计数器，沿用它就等于接下来念的全部白念：`commit` 时 `stage` 按 `sessionID`
+    ///    查重，直接返回那笔旧流水，新念的一声也写不进去，而且**不会有任何报错**。
+    ///
+    /// 两种丢弃都不违背「一声都不能丢」：第 1 种的旧内容在新量法下本就无法换算，
+    /// 第 2 种的内容已经在账本里了。
     @discardableResult
     func begin(itemID: UUID, source: SessionSource, at now: Date = Date()) throws -> SessionDraft {
-        if let existing = try draft(for: itemID) { return existing }
+        if let existing = try draft(for: itemID) {
+            let sameMeasure = existing.source == source
+            let notYetRecorded = !(try ledger.exists(sessionID: existing.sessionID))
+            if sameMeasure && notYetRecorded { return existing }
+            context.delete(existing)
+        }
         let draft = SessionDraft(itemID: itemID, amount: 0,
                                  startedAt: now, updatedAt: now, source: source)
         context.insert(draft)

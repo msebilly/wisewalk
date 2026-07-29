@@ -23,6 +23,15 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     return cal.date(from: c)!
 }
 
+/// 数 `ModelContext.didSave` 的次数。通知块是 `@Sendable` 的，捕获不了外层的 `var`，
+/// 所以要个能跨隔离域安全累加的小盒子。
+private final class SaveCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    func bump() { lock.lock(); value += 1; lock.unlock() }
+    var count: Int { lock.lock(); defer { lock.unlock() }; return value }
+}
+
 @MainActor
 @Test func 开草稿并累加() throws {
     let (drafts, _, _, item) = try makeDraftStore()
@@ -199,4 +208,70 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     try ctx.save()
     #expect(try ModelContext(ctx.container).fetch(FetchDescriptor<PracticeSession>()).count == 1,
             "rollback 之后那笔 999 不该再出现")
+}
+
+@MainActor
+@Test func 量法变了就不沿用旧草稿() throws {
+    // 定课的量法是可以改的（PracticeItemStore.update 开放 measureType）。
+    // 改完之后旧草稿的 amount 与 startedAt 在新量法下每个字段都是错的：
+    // 一份 .timer 草稿被计数器沿用，恢复时会按 updatedAt - startedAt 折成几千秒，
+    // 弹窗写「念了几千声」，用户一确认就写进只增不减的账本。
+    let (drafts, _, _, item) = try makeDraftStore()
+    let old = try drafts.begin(itemID: item.id, source: .timer, at: 北京(7, 28, 9, 0))
+    let oldID = old.sessionID
+    try drafts.touch(old, at: 北京(7, 28, 10, 0))
+
+    let fresh = try drafts.begin(itemID: item.id, source: .counter, at: 北京(7, 28, 11, 0))
+    #expect(fresh.sessionID != oldID, "应当另开一份，而不是把旧的那份改个 source")
+    #expect(fresh.source == .counter)
+    #expect(fresh.amount == 0)
+    #expect(fresh.startedAt == 北京(7, 28, 11, 0), "startedAt 必须是这次开始的时刻")
+    #expect(try drafts.pendingDrafts().count == 1, "旧草稿要删掉，不能两份并存")
+}
+
+@MainActor
+@Test func 已入账的草稿不会被沿用否则接下来念的全白念() throws {
+    // reconcilePendingDrafts 只在启动时跑。用户不重启 App、同一次会话里又进计数器，
+    // 沿用一份已入账的草稿就等于接下来念的全部白念——commit 时 stage 按 sessionID
+    // 查重会直接返回那笔旧流水，新念的一声也写不进去，而且不会有任何报错。
+    let (drafts, ledger, _, item) = try makeDraftStore()
+    let now = 北京(7, 28, 9, 0)
+    let stranded = try drafts.begin(itemID: item.id, source: .counter, at: now)
+    try drafts.update(stranded, amount: 108, at: now)
+    // 模拟跨 store 半途死亡：流水落了，草稿没删
+    try ledger.record(item: item, amount: 108, source: .counter,
+                      startedAt: now, at: now, timeZone: 北京时间, id: stranded.sessionID)
+
+    let fresh = try drafts.begin(itemID: item.id, source: .counter, at: 北京(7, 28, 10, 0))
+    #expect(fresh.sessionID != stranded.sessionID)
+    #expect(fresh.amount == 0)
+    #expect(try drafts.pendingDrafts().count == 1)
+
+    // 要害在这里：接着念的这 50 声必须真能记上
+    try drafts.update(fresh, amount: 50, at: 北京(7, 28, 10, 1))
+    try drafts.commit(fresh, item: item, amount: 50, at: 北京(7, 28, 10, 2), timeZone: 北京时间)
+    #expect(try ledger.total(on: 20260728, itemID: item.id) == 158, "108 + 50，新念的一声都不能丢")
+}
+
+@MainActor
+@Test func 提交只落盘一次() throws {
+    // 这条钉的是「commit 用的是 ledger.stage 而不是 ledger.record」。
+    // 两者签名兼容，换成 record 也能让其余测试全绿——但那样「写流水」与「删草稿」
+    // 就落在两次 save 里，中间死掉会留下「流水已写、草稿还在」，
+    // 下次启动恢复会问用户，用户一确认就记两遍。Task 4 拆出 stage 的全部理由在此。
+    let (drafts, _, ctx, item) = try makeDraftStore()
+    let now = 北京(7, 28, 9, 0)
+    let d = try drafts.begin(itemID: item.id, source: .counter, at: now)
+    try drafts.update(d, amount: 108, at: now)
+
+    let saves = SaveCounter()
+    // object 必须限定成本测试自己的 ctx：Swift Testing 默认并行跑，
+    // 传 nil 会把别的测试的 save 也数进来。
+    let token = NotificationCenter.default.addObserver(
+        forName: ModelContext.didSave, object: ctx, queue: nil
+    ) { _ in saves.bump() }
+    defer { NotificationCenter.default.removeObserver(token) }
+
+    try drafts.commit(d, item: item, amount: 108, at: now, timeZone: 北京时间)
+    #expect(saves.count == 1, "写流水与删草稿必须落在同一次 save 里")
 }
