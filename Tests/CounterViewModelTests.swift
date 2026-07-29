@@ -209,12 +209,14 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
 
 @MainActor
 @Test func 今日已记与流水落在同一天() throws {
-    // 钉住 Q3：committedTotal 算的那天，必须就是流水最终落的那天。
-    // 若「一日起始」与时区两处各传各的，屏幕上的 dayTotal 会成为一个
+    // 钉住 Q3 的「一日起始」那一半：committedTotal 算的那天，
+    // 必须就是流水最终落的那天。若两处各传各的，屏幕上的 dayTotal 会成为一个
     // 哪一天都对不上的游离数字——账本没错，错的是显示。
     //
-    // 这里用最容易露馅的构造：北京 7/29 00:30、一日起始 3 点。
-    // 只要有一处漏了设置（退回 dayStartHour 0 或本机时区），两边就分家。
+    // ⚠️ 这条**只钉得住 dayStartHour，钉不住时区**。删掉 `self.timeZone = timeZone`
+    // 时它红不红，取决于开发机的时区碰巧是什么（实测 PDT 机器上不红：
+    // 北京 7/29 00:30 在 PDT 是 7/28 09:30，已过 3 点，与北京时间拨回后
+    // 恰好都得到 20260728）。时区那一半由下面那条专门管。
     let (vm, _, ledger, item) = try makeCounter()
     let 起 = 北京(7, 28, 23, 40)
     try ledger.record(item: item, amount: 300, source: .counter,
@@ -231,4 +233,38 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     #expect(try ledger.total(on: 20260728, itemID: item.id) == 408,
             "屏幕上的 408 必须就是账本上那一天的 408")
     #expect(try ledger.total(on: 20260729, itemID: item.id) == 0)
+}
+
+@MainActor
+@Test func 结束时用的是进页面时那个时区() throws {
+    // 钉住 Q3 的时区那一半，**且不受开发机时区影响**。
+    //
+    // 直觉的写法是「传北京时间，断言落在哪天」，但那要指望 `.current`
+    // 碰巧不等于北京时间——机器相关，在东八区的机器上必然假绿。
+    // 换个构造绕开：同一时刻跑两遍，喂两个**相差整 24 小时**的固定偏移时区。
+    // 只要 finish 认的是存下来的时区，两边就必然落在相邻的两天；
+    // 若它退回 `.current`，两边用的是同一个时区，就会落在同一天——
+    // 那时不管本机是哪个时区，这条都红。
+    //
+    // 用固定偏移而不是地名时区，是为了躲开夏令时。
+    let 东十三 = TimeZone(secondsFromGMT: 13 * 3600)!
+    let 西十一 = TimeZone(secondsFromGMT: -11 * 3600)!
+    let 同一时刻 = 北京(7, 28, 12, 0)
+
+    func 落在哪天(_ tz: TimeZone) throws -> Int {
+        let (vm, _, ledger, item) = try makeCounter()
+        try vm.start(at: 同一时刻, timeZone: tz)
+        try vm.tap(at: 同一时刻)
+        try vm.finish(at: 同一时刻)
+        let 有账的那天 = try [20260727, 20260728, 20260729]
+            .filter { try ledger.total(on: $0, itemID: item.id) == 1 }
+        #expect(有账的那天.count == 1, "这一声必须且只能落在一天上")
+        return 有账的那天[0]
+    }
+
+    let 早 = try 落在哪天(东十三)
+    let 晚 = try 落在哪天(西十一)
+    #expect(早 == 20260728)
+    #expect(晚 == 20260727)
+    #expect(早 != 晚, "同一时刻、相差整日的两个时区，不该落在同一天")
 }
