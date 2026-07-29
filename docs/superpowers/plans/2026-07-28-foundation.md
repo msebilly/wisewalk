@@ -1754,7 +1754,7 @@ final class DayLedger {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd /Users/bill/Documents/GitHub/wisewalk && make test`
-Expected: 13 个 DayLedger 测试全部 `passed`，特别确认 `撤销是追加负数而非删除` 与 `同一编号重复入账只记一笔`
+Expected: 12 个 DayLedger 测试全部 `passed`（累计 54），特别确认 `撤销是追加负数而非删除` 与 `同一编号重复入账只记一笔`
 
 - [ ] **Step 5: 提交**
 
