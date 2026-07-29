@@ -8,6 +8,15 @@ import UIKit
             ["念佛", "持咒", "诵经", "拜佛", "打坐", "抄经", "供养", "放生布施"])
 }
 
+@Test func 模板key逐一钉死() {
+    // key 会落库进 PracticeItem.templateKey 并同步到 CloudKit，**发布后永远不许改**。
+    // 只钉名字是不够的：把 prostrate 改成 prostration（动名词，看着更「对」）
+    // 能通过所有其他测试，却会让老用户的历史流水按 key 查不到。
+    #expect(TemplateCatalog.all.map(\.key) ==
+            ["chanting", "mantra", "sutra", "prostrate",
+             "meditation", "copying", "offering", "release"])
+}
+
 @Test func 持咒与抄经必须在清单里() {
     // 这两类是 spec v2.0 前的范围遗漏，靠三款竞品交叉验证才补回来。
     // 评论里大悲咒/心咒/往生咒高频出现。这条测试是防止它们再被删掉的钉子。
