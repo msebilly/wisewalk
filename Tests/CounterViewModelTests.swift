@@ -41,6 +41,8 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
 }
 
 @MainActor
+struct CounterViewModelTests {
+
 @Test func 每点一下加一() throws {
     let (vm, _, _, _, _) = try makeCounter()
     let now = 北京(7, 28, 9, 0)
@@ -374,3 +376,5 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     #expect(晚 == 20260727)
     #expect(早 != 晚, "同一时刻、相差整日的两个时区，不该落在同一天")
 }
+
+} // @MainActor struct CounterViewModelTests
