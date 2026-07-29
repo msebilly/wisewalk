@@ -227,6 +227,45 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
 }
 
 @MainActor
+@Test func 孤儿流水不计入任何定课项的统计() throws {
+    // item == nil 的流水（定课项被硬删后遗留的孤儿）被 sessions(on:itemID:) 里
+    // $0.item?.id == itemID 这道过滤挡在所有查询之外：既不出现在任何 sessions 结果，
+    // 也不进 total / rawTotal。故 PracticeItem 只能归档（isArchived）、**绝不能硬删**——
+    // 一旦硬删，那项的全部历史会从每个统计里凭空蒸发，正是本数据模型要根除的静默丢数。
+    // （让孤儿重新现身是第 3 卷诊断的活儿。）
+    let (ledger, ctx, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+    try ledger.record(item: item, amount: 108, source: .counter,
+                      startedAt: now, endedAt: now, at: now, timeZone: 北京时间)
+
+    // 直接插入一笔孤儿流水（测试夹具，故意绕过 DayLedger 制造 item == nil）。
+    let orphan = PracticeSession(
+        item: nil,
+        dayKey: 20260728,
+        tzOffsetMinutes: 480,
+        amount: 500,
+        startedAt: now,
+        endedAt: now,
+        source: .manual,
+        deviceName: "iPad·TEST",
+        createdAt: now
+    )
+    ctx.insert(orphan)
+    try ctx.save()
+
+    // 夹具自检：孤儿确实落库了，测试不是空转。
+    #expect(try ctx.fetch(FetchDescriptor<PracticeSession>()).count == 2, "孤儿应已入库")
+
+    let 该项流水 = try ledger.sessions(on: 20260728, itemID: item.id)
+    #expect(该项流水.count == 1, "孤儿流水不该出现在任何定课项的 sessions 结果里")
+    #expect(该项流水.allSatisfy { $0.id != orphan.id }, "孤儿不该混进该项流水")
+    #expect(try ledger.total(on: 20260728, itemID: item.id) == 108,
+            "孤儿的 500 不计入 total，所以 PracticeItem 只能归档不能硬删，否则历史蒸发")
+    #expect(try ledger.rawTotal(on: 20260728, itemID: item.id) == 108,
+            "孤儿的 500 也不计入 rawTotal")
+}
+
+@MainActor
 @Test func 补记到指定日期而写入时间仍为当下() throws {
     // §6.4：dayKey 为所选日期，但 createdAt 必须是真实写入时刻、tzOffsetMinutes 为当前偏移。
     // 「功课发生在哪天」与「这条何时写下」是两件事，不能挤进同一个 at: 参数——

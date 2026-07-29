@@ -17,7 +17,10 @@ final class PracticeSession {
     var id: UUID = UUID()
 
     /// 所属定课项。CloudKit 要求关系必须可选。
-    /// 为 nil 表示定课项已被清理，但这笔流水依然作数。
+    /// 为 nil 即**孤儿流水**：`sessions(on:itemID:)` 里 `$0.item?.id == itemID` 这道过滤
+    /// 会把它挡在所有 per-item 查询之外，既不进 `total` 也不进 `rawTotal`——它当前**不计入任何统计**。
+    /// 所以 `PracticeItem` 只能归档（`isArchived`）、**绝不能硬删**：硬删会让该项全部历史
+    /// 从每个统计里凭空蒸发，正是本数据模型要根除的静默丢数。（让孤儿重新现身是第 3 卷诊断的事。）
     var item: PracticeItem?
 
     /// yyyyMMdd。**写入后永不重算。**

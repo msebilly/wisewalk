@@ -117,6 +117,9 @@ final class DayLedger {
     /// 先按 dayKey 取库、再在内存里按定课项过滤，是刻意为之：
     /// `#Predicate` 穿透可选关系（`$0.item?.id == x`）在 SwiftData 上行为不稳，
     /// 而一天的流水至多几十条，内存过滤的代价可以忽略。
+    ///
+    /// `$0.item?.id == itemID` 会**排除 item == nil 的孤儿流水**：它们不进任何 per-item 统计，
+    /// 故 `PracticeItem` 只能归档不能硬删，否则历史静默蒸发（详见 `PracticeSession.item`）。
     func sessions(on dayKey: Int, itemID: UUID) throws -> [PracticeSession] {
         let key = dayKey
         let sameDay = try context.fetch(
