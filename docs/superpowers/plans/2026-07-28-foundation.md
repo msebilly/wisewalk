@@ -1087,8 +1087,17 @@ import Foundation
 }
 ```
 
-- [ ] **Step 3: 跑测试确认失败**
+> **这四条守卫已实测确认能咬人**，不是摆设。分别往模型里塞过
+> `@Attribute(.unique)`、无默认值的非可选属性、名为 `todayTotal` 的字段，
+> 三条守卫都如期变红并指名道姓。
+>
+> 唯一需要说明的是反向关系那条：**把 `inverse:` 从 `@Relationship` 里删掉，测试照样通过**——
+> 因为 SwiftData 会在候选唯一时自动推断反向关系，CloudKit 也就满意了，这不算违规。
+> 它真正拦的是压根无从推断的情形（比如 `DaySnapshot` 单向指向 `PracticeItem`
+> 而对方没有任何回指），实测此时 `inverseName` 为 nil，守卫立刻变红。
+> 后来人若发现删 `inverse:` 不报错，别急着断言守卫失灵。
 
+- [ ] **Step 3: 跑测试确认失败**
 Run: `cd /Users/bill/Documents/GitHub/wisewalk && make test`
 Expected: 编译失败，报 `cannot find 'ModelContainerFactory' in scope`
 
