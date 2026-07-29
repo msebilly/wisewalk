@@ -8,7 +8,7 @@ import SwiftData
 /// 不能因此变回「未完成」——那等于告诉他过去三十天白做了。
 ///
 /// 注意此处**没有** `@Attribute(.unique)`：CloudKit 不支持唯一约束。
-/// 同一 dayKey 出现多条快照的去重责任在 `DayLedger.snapshot(for:activeItems:)`。
+/// 同一 dayKey 出现多条快照的合并责任在 `DayLedger`（并集推导出只读 `DayPlan`）。
 @Model
 final class DaySnapshot {
     var id: UUID = UUID()

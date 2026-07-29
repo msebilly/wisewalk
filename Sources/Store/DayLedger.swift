@@ -133,9 +133,24 @@ final class DayLedger {
         try fetch(sessionID: sessionID) != nil
     }
 
-    // MARK: - 快照与圆满
+    // MARK: - 当日计划与圆满
 
-    /// 取某天的应做清单快照；不存在则依 `activeItems` 生成并落库。
+    /// 只读地取某天的应做清单：合并该日**所有** `DaySnapshot` 得出 `DayPlan`，
+    /// 无任何同日快照则返回 nil。**本方法绝不插入、修改或保存任何东西。**
+    ///
+    /// 这是月历等纯渲染路径唯一该走的门：翻看三个月前的某天不该凭空捏造一条快照，
+    /// 断言用户当时「本该」做今年才新建的功课——那种伪造会同步到每台设备、永久留存。
+    /// 派生视图做成值类型（`DayPlan`）而非回写源记录，正是为了根除这种「读一下就写库」。
+    func existingPlan(for dayKey: Int) throws -> DayPlan? {
+        let key = dayKey
+        let existing = try context.fetch(
+            FetchDescriptor<DaySnapshot>(predicate: #Predicate { $0.dayKey == key })
+        )
+        guard !existing.isEmpty else { return nil }
+        return Self.merge(dayKey: dayKey, snapshots: existing)
+    }
+
+    /// 取某天的应做计划；该日尚无任何快照时才依 `activeItems` 生成并落库。
     ///
     /// **已存在快照里各项的目标绝不改写。** 用户今天把目标从 1000 调到 3000，
     /// 上个月那些标着圆满的日子不能因此变回未完成——那等于告诉他过去三十天白做了。
@@ -150,45 +165,17 @@ final class DayLedger {
     /// 守住「绝不回溯改写过去某天目标」的铁律；只有最早快照对某项**毫无意见**（并集新增项）时，
     /// 才采用「含该项的最早一条快照」的目标，同样按 `(createdAt, id)` 确定性解析。
     ///
-    /// 并集结果**仅在确有变化时**才回写到最早那条并保存，避免每次读取都无谓地扰动 CloudKit。
-    /// 回写是派生结果而非权威：源快照**绝不删除**，故即便某次回写在整记录级 LWW 里输掉，
-    /// 下次读取仍能从幸存的源快照重算并集而自愈。
+    /// 合并结果是**派生视图**，不回写任何源快照：源快照**绝不删除**、各自保持原样，
+    /// 每次读取重新合并即自愈，即便某条在整记录级 LWW 里输掉也不影响并集结果。
+    ///
+    /// 只有用户**真正打开/记录某天**、或按 §6.4 补记历史日期时才走本方法生成快照；
+    /// 纯渲染请改用只读的 `existingPlan(for:)`。
     ///
     /// 代价（已知并接受）：已归档的功课当天可能多唠叨一次，
     /// 某天也可能在更全的信息同步进来后由圆满退回待完成。
-    func snapshot(for dayKey: Int, activeItems: [PracticeItem]) throws -> DaySnapshot {
-        let key = dayKey
-        let existing = try context.fetch(
-            FetchDescriptor<DaySnapshot>(predicate: #Predicate { $0.dayKey == key })
-        )
-        if !existing.isEmpty {
-            let ordered = existing.sorted {
-                ($0.createdAt, $0.id.uuidString) < ($1.createdAt, $1.id.uuidString)
-            }
-            let earliest = ordered[0]
-
-            // 应做项：所有同日快照的并集，按 uuidString 排序确保跨设备一致。
-            var idSet = Set<UUID>()
-            for snap in ordered { idSet.formUnion(snap.requiredItemIDs) }
-            let mergedIDs = idSet.sorted { $0.uuidString < $1.uuidString }
-
-            // 目标：逐项取「含该项的最早一条快照」的意见——
-            // 已在最早快照里的项，其最早目标（含「无目标」）自然胜出，历史不被改写。
-            var mergedGoals: [String: Int] = [:]
-            for id in mergedIDs {
-                guard let source = ordered.first(where: { $0.requiredItemIDs.contains(id) }) else { continue }
-                if let goal = source.goals[id.uuidString] {
-                    mergedGoals[id.uuidString] = goal
-                }
-            }
-
-            // 仅在并集确有变化时才回写，避免无谓的 CloudKit churn。
-            if earliest.requiredItemIDs != mergedIDs || earliest.goals != mergedGoals {
-                earliest.requiredItemIDs = mergedIDs
-                earliest.goals = mergedGoals
-                try context.save()
-            }
-            return earliest
+    func plan(for dayKey: Int, activeItems: [PracticeItem]) throws -> DayPlan {
+        if let existing = try existingPlan(for: dayKey) {
+            return existing
         }
 
         let required = activeItems.filter { !$0.isArchived }
@@ -206,18 +193,44 @@ final class DayLedger {
         )
         context.insert(snapshot)
         try context.save()
-        return snapshot
+        return DayPlan(dayKey: dayKey, requiredItemIDs: snapshot.requiredItemIDs, goals: goals)
     }
 
-    /// 依快照判定完成状态。**永不按当前设置实时重算。**
+    /// 把同日多条快照合并成只读 `DayPlan`。纯函数，不碰上下文，故不会写库。
+    private static func merge(dayKey: Int, snapshots: [DaySnapshot]) -> DayPlan {
+        let ordered = snapshots.sorted {
+            ($0.createdAt, $0.id.uuidString) < ($1.createdAt, $1.id.uuidString)
+        }
+
+        // 应做项：所有同日快照的并集，按 uuidString 排序确保跨设备逐位一致。
+        var idSet = Set<UUID>()
+        for snap in ordered { idSet.formUnion(snap.requiredItemIDs) }
+        let mergedIDs = idSet.sorted { $0.uuidString < $1.uuidString }
+
+        // 目标：逐项取「含该项的最早一条快照」的意见——
+        // 已在最早快照里的项，其最早目标（含「无目标」）自然胜出，历史不被改写。
+        var mergedGoals: [String: Int] = [:]
+        for id in mergedIDs {
+            guard let source = ordered.first(where: { $0.requiredItemIDs.contains(id) }) else { continue }
+            if let goal = source.goals[id.uuidString] {
+                mergedGoals[id.uuidString] = goal
+            }
+        }
+
+        return DayPlan(dayKey: dayKey, requiredItemIDs: mergedIDs, goals: mergedGoals)
+    }
+
+    /// 依计划判定完成状态。**永不按当前设置实时重算。**
+    ///
+    /// `dayKey` 取自 `plan.dayKey`，不再单独传参——
+    /// 从源头杜绝「拿甲日的清单去核对乙日的总数」这种静默错配。
     func fulfillment(
         of itemID: UUID,
-        on dayKey: Int,
-        snapshot: DaySnapshot
+        plan: DayPlan
     ) throws -> FulfillmentState {
-        guard snapshot.requiredItemIDs.contains(itemID) else { return .notRequired }
-        let total = try total(on: dayKey, itemID: itemID)
-        return LedgerMath.isFulfilled(total: total, goal: snapshot.goals[itemID.uuidString])
+        guard plan.requiredItemIDs.contains(itemID) else { return .notRequired }
+        let total = try total(on: plan.dayKey, itemID: itemID)
+        return LedgerMath.isFulfilled(total: total, goal: plan.goals[itemID.uuidString])
             ? .fulfilled
             : .pending
     }

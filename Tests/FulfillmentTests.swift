@@ -28,7 +28,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     ctx.insert(a); ctx.insert(b)
     try ctx.save()
 
-    let snap = try ledger.snapshot(for: 20260728, activeItems: [a, b])
+    let snap = try ledger.plan(for: 20260728, activeItems: [a, b])
     #expect(Set(snap.requiredItemIDs) == [a.id, b.id])
     #expect(snap.goals[a.id.uuidString] == 1000)
     #expect(snap.goals[b.id.uuidString] == nil, "未设目标的项不进 goals 字典")
@@ -41,12 +41,12 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     ctx.insert(a)
     try ctx.save()
 
-    _ = try ledger.snapshot(for: 20260728, activeItems: [a])
+    _ = try ledger.plan(for: 20260728, activeItems: [a])
 
     a.dailyGoal = 3000
     try ctx.save()
 
-    let again = try ledger.snapshot(for: 20260728, activeItems: [a])
+    let again = try ledger.plan(for: 20260728, activeItems: [a])
     #expect(again.goals[a.id.uuidString] == 1000, "过去的日子不许被今天的设置改写")
 }
 
@@ -65,7 +65,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     ctx.insert(late); ctx.insert(early)
     try ctx.save()
 
-    let snap = try ledger.snapshot(for: 20260728, activeItems: [a])
+    let snap = try ledger.plan(for: 20260728, activeItems: [a])
     #expect(snap.goals[a.id.uuidString] == 1000, "去重必须确定性地取最早那条")
 }
 
@@ -86,7 +86,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     ctx.insert(late); ctx.insert(early)
     try ctx.save()
 
-    let snap = try ledger.snapshot(for: 20260728, activeItems: [a, b])
+    let snap = try ledger.plan(for: 20260728, activeItems: [a, b])
     #expect(Set(snap.requiredItemIDs) == [a.id, b.id], "应做项应取并集，b 不能丢")
     #expect(snap.goals[a.id.uuidString] == 1000, "a 已在最早快照，最早目标为准")
 }
@@ -108,7 +108,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     ctx.insert(late); ctx.insert(early)
     try ctx.save()
 
-    let snap = try ledger.snapshot(for: 20260728, activeItems: [a, b])
+    let snap = try ledger.plan(for: 20260728, activeItems: [a, b])
     #expect(snap.goals[b.id.uuidString] == 1800, "并集新增项沿用其来源快照的目标")
 }
 
@@ -132,7 +132,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
         if insertLateFirst { ctx.insert(late); ctx.insert(early) }
         else { ctx.insert(early); ctx.insert(late) }
         try ctx.save()
-        return try ledger.snapshot(for: 20260728, activeItems: [a, b]).requiredItemIDs
+        return try ledger.plan(for: 20260728, activeItems: [a, b]).requiredItemIDs
     }
 
     #expect(try runMerged(insertLateFirst: true) == (try runMerged(insertLateFirst: false)),
@@ -140,9 +140,10 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
 }
 
 @MainActor
-@Test func 并集后原始快照不被删除() throws {
-    // 并集是派生结果而非权威：源快照绝不删除，
-    // 这样即使某次回写在 LWW 里输掉，下次读取仍能从幸存的源快照重算并自愈。
+@Test func 读取计划不改写任何源快照() throws {
+    // 合并是派生视图、绝不回写：读取后每条源快照都必须还是当初被创建时的原样
+    // （不只是「记录还在」，而是 requiredItemIDs 与 goals 一字未改）。
+    // 只要源快照原封不动，即便某条在 LWW 里输掉，下次读取仍能从幸存的重算并自愈。
     let (ledger, ctx) = try makeEnv()
     let a = PracticeItem(name: "念佛", dailyGoal: 1000)
     let b = PracticeItem(name: "打坐", measureType: .duration, dailyGoal: 1800)
@@ -156,13 +157,36 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     ctx.insert(late); ctx.insert(early)
     try ctx.save()
 
-    _ = try ledger.snapshot(for: 20260728, activeItems: [a, b])
+    _ = try ledger.plan(for: 20260728, activeItems: [a, b])
 
     let key = 20260728
     let remaining = try ctx.fetch(
         FetchDescriptor<DaySnapshot>(predicate: #Predicate { $0.dayKey == key })
     )
-    #expect(remaining.count == 2, "并集绝不删除任何源快照，否则自愈能力尽失")
+    #expect(remaining.count == 2, "合并绝不删除任何源快照，否则自愈能力尽失")
+
+    let savedEarly = try #require(remaining.first { $0.id == early.id })
+    #expect(savedEarly.requiredItemIDs == [a.id], "源快照被回写了，读路径不该写库")
+    #expect(savedEarly.goals == [a.id.uuidString: 1000], "源快照的目标被回写了")
+
+    let savedLate = try #require(remaining.first { $0.id == late.id })
+    #expect(savedLate.requiredItemIDs == [a.id, b.id], "源快照被回写了，读路径不该写库")
+    #expect(savedLate.goals == [b.id.uuidString: 1800], "源快照的目标被回写了")
+}
+
+@MainActor
+@Test func 只读查询过去的日子不写入任何东西() throws {
+    // Finding 1 回归：月历翻看历史只该渲染，绝不能凭空捏造一条过去的快照，
+    // 断言用户当时「本该」做今年才新建的功课——那种伪造会同步到每台设备、永久留存。
+    let (ledger, ctx) = try makeEnv()
+    let a = PracticeItem(name: "念佛", dailyGoal: 1000)
+    ctx.insert(a)
+    try ctx.save()
+
+    let plan = try ledger.existingPlan(for: 20250115)
+    #expect(plan == nil, "该日无快照，只读查询必须返回 nil 而非凭空生成")
+    #expect(try ctx.fetch(FetchDescriptor<DaySnapshot>()).count == 0,
+            "只读查询过去的日子绝不许写入任何快照")
 }
 
 @MainActor
@@ -173,7 +197,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     ctx.insert(a); ctx.insert(old)
     try ctx.save()
 
-    let snap = try ledger.snapshot(for: 20260728, activeItems: [a, old])
+    let snap = try ledger.plan(for: 20260728, activeItems: [a, old])
     #expect(snap.requiredItemIDs == [a.id])
 }
 
@@ -183,13 +207,13 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     let a = PracticeItem(name: "念佛", dailyGoal: 1000)
     ctx.insert(a)
     try ctx.save()
-    let snap = try ledger.snapshot(for: 20260728, activeItems: [a])
+    let snap = try ledger.plan(for: 20260728, activeItems: [a])
 
     let now = 北京(7, 28, 9)
     try ledger.record(item: a, amount: 500, source: .counter,
                       startedAt: now, endedAt: now, at: now, timeZone: 北京时间)
 
-    #expect(try ledger.fulfillment(of: a.id, on: 20260728, snapshot: snap) == .pending)
+    #expect(try ledger.fulfillment(of: a.id, plan: snap) == .pending)
 }
 
 @MainActor
@@ -198,13 +222,13 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     let a = PracticeItem(name: "念佛", dailyGoal: 1000)
     ctx.insert(a)
     try ctx.save()
-    let snap = try ledger.snapshot(for: 20260728, activeItems: [a])
+    let snap = try ledger.plan(for: 20260728, activeItems: [a])
 
     let now = 北京(7, 28, 9)
     try ledger.record(item: a, amount: 1000, source: .counter,
                       startedAt: now, endedAt: now, at: now, timeZone: 北京时间)
 
-    #expect(try ledger.fulfillment(of: a.id, on: 20260728, snapshot: snap) == .fulfilled)
+    #expect(try ledger.fulfillment(of: a.id, plan: snap) == .fulfilled)
 }
 
 @MainActor
@@ -213,14 +237,14 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     let a = PracticeItem(name: "放生", measureType: .check, dailyGoal: nil)
     ctx.insert(a)
     try ctx.save()
-    let snap = try ledger.snapshot(for: 20260728, activeItems: [a])
+    let snap = try ledger.plan(for: 20260728, activeItems: [a])
 
-    #expect(try ledger.fulfillment(of: a.id, on: 20260728, snapshot: snap) == .pending)
+    #expect(try ledger.fulfillment(of: a.id, plan: snap) == .pending)
 
     let now = 北京(7, 28, 9)
     try ledger.record(item: a, amount: 1, source: .manual,
                       startedAt: now, endedAt: now, at: now, timeZone: 北京时间)
-    #expect(try ledger.fulfillment(of: a.id, on: 20260728, snapshot: snap) == .fulfilled)
+    #expect(try ledger.fulfillment(of: a.id, plan: snap) == .fulfilled)
 }
 
 @MainActor
@@ -231,9 +255,9 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     ctx.insert(a); ctx.insert(b)
     try ctx.save()
     // 只把 a 列入当日清单
-    let snap = try ledger.snapshot(for: 20260728, activeItems: [a])
+    let snap = try ledger.plan(for: 20260728, activeItems: [a])
 
-    #expect(try ledger.fulfillment(of: b.id, on: 20260728, snapshot: snap) == .notRequired)
+    #expect(try ledger.fulfillment(of: b.id, plan: snap) == .notRequired)
 }
 
 @MainActor
@@ -242,13 +266,13 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     let a = PracticeItem(name: "念佛", dailyGoal: 1000)
     ctx.insert(a)
     try ctx.save()
-    let snap = try ledger.snapshot(for: 20260728, activeItems: [a])
+    let snap = try ledger.plan(for: 20260728, activeItems: [a])
 
     let now = 北京(7, 28, 9)
     let s = try ledger.record(item: a, amount: 1000, source: .counter,
                               startedAt: now, endedAt: now, at: now, timeZone: 北京时间)
-    #expect(try ledger.fulfillment(of: a.id, on: 20260728, snapshot: snap) == .fulfilled)
+    #expect(try ledger.fulfillment(of: a.id, plan: snap) == .fulfilled)
 
     try ledger.revoke(s, at: now, timeZone: 北京时间)
-    #expect(try ledger.fulfillment(of: a.id, on: 20260728, snapshot: snap) == .pending)
+    #expect(try ledger.fulfillment(of: a.id, plan: snap) == .pending)
 }
