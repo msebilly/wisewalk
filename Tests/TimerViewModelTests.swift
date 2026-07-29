@@ -117,7 +117,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int, _ s: Int = 0) -> D
 }
 
 @MainActor
-@Test func 重复结束不会记两笔() throws {
+@Test func 重复按结束不会记两坐() throws {
     let (vm, _, ledger, item, _) = try makeTimer()
     let start = 北京(7, 28, 6, 0)
     try vm.start(at: start, timeZone: 北京时间)
@@ -128,7 +128,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int, _ s: Int = 0) -> D
 }
 
 @MainActor
-@Test func 放弃则草稿与账本都不留痕() throws {
+@Test func 放弃这一坐则草稿与账本都不留痕() throws {
     let (vm, drafts, _, _, ctx) = try makeTimer()
     try vm.start(at: 北京(7, 28, 6, 0), timeZone: 北京时间)
     // 打满四十分钟心跳再放弃——崩溃恢复靠心跳，心跳若污了账本，这里就该炸。
@@ -220,7 +220,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int, _ s: Int = 0) -> D
 }
 
 @MainActor
-@Test func 落哪天按结束那一刻算而不是开始那一刻() throws {
+@Test func 落哪天按收坐那一刻算而不是起坐那一刻() throws {
     // 夜坐跨零点。dayKey 由 finish 那一刻推导，不是由起坐那一刻。
     // 这条规矩若没有测试钉住，把 `DraftStore.commit` 的 `at: now`
     // 换成 `at: draft.startedAt` 会全卷全绿（Task 9 实测过）。
@@ -232,7 +232,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int, _ s: Int = 0) -> D
 }
 
 @MainActor
-@Test func 跨零点结束后屏幕上的今日不带昨天的数() throws {
+@Test func 坐过零点后屏幕上的今日不带昨天的数() throws {
     // 夜坐 23:40 起坐，坐到次日 0:10 结束。
     // `committedTotal` 是**进页面那一刻那一天**的数，流水却落在**结束那一刻**那一天。
     // 无脑 `+=` 就把昨天早课那 3600 秒算进了「今日」，副标题报 5400 秒——
@@ -254,7 +254,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int, _ s: Int = 0) -> D
 }
 
 @MainActor
-@Test func 结束时用的是进页面时那个时区() throws {
+@Test func 收坐时用的是进页面时那个时区() throws {
     // 「一日起始」与时区在 `start()` 时存住，`finish()` 不再单收——
     // 两处各收各的、传得不一致时，`committedTotal` 算的是 A 天、流水写进 B 天，
     // 屏幕上的 `dayTotal` 就成了哪一天都对不上的游离数字。
