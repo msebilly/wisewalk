@@ -137,20 +137,57 @@ final class DayLedger {
 
     /// 取某天的应做清单快照；不存在则依 `activeItems` 生成并落库。
     ///
-    /// **已存在的快照绝不改写。** 用户今天把目标从 1000 调到 3000，
-    /// 上个月那些标着圆满的日子不能因此变回未完成——
-    /// 那等于告诉他过去三十天白做了。
+    /// **已存在快照里各项的目标绝不改写。** 用户今天把目标从 1000 调到 3000，
+    /// 上个月那些标着圆满的日子不能因此变回未完成——那等于告诉他过去三十天白做了。
     ///
-    /// `DaySnapshot` 没有唯一约束（CloudKit 不支持），
-    /// 两台设备可能各生成一条同日快照，故按 `(createdAt, id)` 确定性地取最早一条。
+    /// `DaySnapshot` 没有唯一约束（CloudKit 不支持），两台设备可能各生成一条同日快照，
+    /// 且「最早一条」未必**最全**：iPad 清早只登记了念佛，iPhone 稍后新增并修了打坐，
+    /// 若只取最早一条，打坐会被判为当日无需完成而从清单上悄悄消失。
+    /// 故**应做项取所有同日快照的并集**（CRDT G-Set，可交换、可结合、幂等），
+    /// 按 `uuidString` 排序保证各设备产出逐位相同的数组、真正达成一致。
+    ///
+    /// 目标的取值：某项若已在最早快照里出现，最早那条的意见（哪怕是「没设目标」）为准，
+    /// 守住「绝不回溯改写过去某天目标」的铁律；只有最早快照对某项**毫无意见**（并集新增项）时，
+    /// 才采用「含该项的最早一条快照」的目标，同样按 `(createdAt, id)` 确定性解析。
+    ///
+    /// 并集结果**仅在确有变化时**才回写到最早那条并保存，避免每次读取都无谓地扰动 CloudKit。
+    /// 回写是派生结果而非权威：源快照**绝不删除**，故即便某次回写在整记录级 LWW 里输掉，
+    /// 下次读取仍能从幸存的源快照重算并集而自愈。
+    ///
+    /// 代价（已知并接受）：已归档的功课当天可能多唠叨一次，
+    /// 某天也可能在更全的信息同步进来后由圆满退回待完成。
     func snapshot(for dayKey: Int, activeItems: [PracticeItem]) throws -> DaySnapshot {
         let key = dayKey
         let existing = try context.fetch(
             FetchDescriptor<DaySnapshot>(predicate: #Predicate { $0.dayKey == key })
         )
-        if let earliest = existing.min(by: {
-            ($0.createdAt, $0.id.uuidString) < ($1.createdAt, $1.id.uuidString)
-        }) {
+        if !existing.isEmpty {
+            let ordered = existing.sorted {
+                ($0.createdAt, $0.id.uuidString) < ($1.createdAt, $1.id.uuidString)
+            }
+            let earliest = ordered[0]
+
+            // 应做项：所有同日快照的并集，按 uuidString 排序确保跨设备一致。
+            var idSet = Set<UUID>()
+            for snap in ordered { idSet.formUnion(snap.requiredItemIDs) }
+            let mergedIDs = idSet.sorted { $0.uuidString < $1.uuidString }
+
+            // 目标：逐项取「含该项的最早一条快照」的意见——
+            // 已在最早快照里的项，其最早目标（含「无目标」）自然胜出，历史不被改写。
+            var mergedGoals: [String: Int] = [:]
+            for id in mergedIDs {
+                guard let source = ordered.first(where: { $0.requiredItemIDs.contains(id) }) else { continue }
+                if let goal = source.goals[id.uuidString] {
+                    mergedGoals[id.uuidString] = goal
+                }
+            }
+
+            // 仅在并集确有变化时才回写，避免无谓的 CloudKit churn。
+            if earliest.requiredItemIDs != mergedIDs || earliest.goals != mergedGoals {
+                earliest.requiredItemIDs = mergedIDs
+                earliest.goals = mergedGoals
+                try context.save()
+            }
             return earliest
         }
 

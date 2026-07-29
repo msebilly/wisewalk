@@ -70,6 +70,102 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
 }
 
 @MainActor
+@Test func 同日多条快照的应做项取并集() throws {
+    // 场景：iPad 清早只登记了 a，iPhone 稍后新增并修了 b。
+    // 若只取最早一条，b 会被判为当日无需完成而从清单上消失。
+    let (ledger, ctx) = try makeEnv()
+    let a = PracticeItem(name: "念佛", dailyGoal: 1000)
+    let b = PracticeItem(name: "打坐", measureType: .duration, dailyGoal: 1800)
+    ctx.insert(a); ctx.insert(b)
+    let early = DaySnapshot(dayKey: 20260728, requiredItemIDs: [a.id],
+                            goals: [a.id.uuidString: 1000],
+                            createdAt: Date(timeIntervalSince1970: 1000))
+    let late = DaySnapshot(dayKey: 20260728, requiredItemIDs: [a.id, b.id],
+                           goals: [a.id.uuidString: 9999, b.id.uuidString: 1800],
+                           createdAt: Date(timeIntervalSince1970: 2000))
+    ctx.insert(late); ctx.insert(early)
+    try ctx.save()
+
+    let snap = try ledger.snapshot(for: 20260728, activeItems: [a, b])
+    #expect(Set(snap.requiredItemIDs) == [a.id, b.id], "应做项应取并集，b 不能丢")
+    #expect(snap.goals[a.id.uuidString] == 1000, "a 已在最早快照，最早目标为准")
+}
+
+@MainActor
+@Test func 并集中新增项沿用其来源快照的目标() throws {
+    // b 只存在于较晚那条快照，最早快照对它没有任何意见，
+    // 故 b 的目标取自「含它的最早一条快照」。
+    let (ledger, ctx) = try makeEnv()
+    let a = PracticeItem(name: "念佛", dailyGoal: 1000)
+    let b = PracticeItem(name: "打坐", measureType: .duration, dailyGoal: 1800)
+    ctx.insert(a); ctx.insert(b)
+    let early = DaySnapshot(dayKey: 20260728, requiredItemIDs: [a.id],
+                            goals: [a.id.uuidString: 1000],
+                            createdAt: Date(timeIntervalSince1970: 1000))
+    let late = DaySnapshot(dayKey: 20260728, requiredItemIDs: [a.id, b.id],
+                           goals: [a.id.uuidString: 9999, b.id.uuidString: 1800],
+                           createdAt: Date(timeIntervalSince1970: 2000))
+    ctx.insert(late); ctx.insert(early)
+    try ctx.save()
+
+    let snap = try ledger.snapshot(for: 20260728, activeItems: [a, b])
+    #expect(snap.goals[b.id.uuidString] == 1800, "并集新增项沿用其来源快照的目标")
+}
+
+@MainActor
+@Test func 并集顺序确定() throws {
+    // 两台设备插入次序相反，也必须产出逐位相同的 requiredItemIDs 数组，
+    // 否则「跨设备一致」只是口号。故并集按 uuidString 排序。
+    let a = PracticeItem(name: "念佛", dailyGoal: 1000)
+    let b = PracticeItem(name: "打坐", measureType: .duration, dailyGoal: 1800)
+
+    func runMerged(insertLateFirst: Bool) throws -> [UUID] {
+        let container = try ModelContainerFactory.inMemory()
+        let ctx = ModelContext(container)
+        let ledger = DayLedger(context: ctx, deviceName: "iPhone·TEST")
+        let early = DaySnapshot(dayKey: 20260728, requiredItemIDs: [a.id],
+                                goals: [a.id.uuidString: 1000],
+                                createdAt: Date(timeIntervalSince1970: 1000))
+        let late = DaySnapshot(dayKey: 20260728, requiredItemIDs: [a.id, b.id],
+                               goals: [b.id.uuidString: 1800],
+                               createdAt: Date(timeIntervalSince1970: 2000))
+        if insertLateFirst { ctx.insert(late); ctx.insert(early) }
+        else { ctx.insert(early); ctx.insert(late) }
+        try ctx.save()
+        return try ledger.snapshot(for: 20260728, activeItems: [a, b]).requiredItemIDs
+    }
+
+    #expect(try runMerged(insertLateFirst: true) == (try runMerged(insertLateFirst: false)),
+            "并集顺序必须与插入次序无关")
+}
+
+@MainActor
+@Test func 并集后原始快照不被删除() throws {
+    // 并集是派生结果而非权威：源快照绝不删除，
+    // 这样即使某次回写在 LWW 里输掉，下次读取仍能从幸存的源快照重算并自愈。
+    let (ledger, ctx) = try makeEnv()
+    let a = PracticeItem(name: "念佛", dailyGoal: 1000)
+    let b = PracticeItem(name: "打坐", measureType: .duration, dailyGoal: 1800)
+    ctx.insert(a); ctx.insert(b)
+    let early = DaySnapshot(dayKey: 20260728, requiredItemIDs: [a.id],
+                            goals: [a.id.uuidString: 1000],
+                            createdAt: Date(timeIntervalSince1970: 1000))
+    let late = DaySnapshot(dayKey: 20260728, requiredItemIDs: [a.id, b.id],
+                           goals: [b.id.uuidString: 1800],
+                           createdAt: Date(timeIntervalSince1970: 2000))
+    ctx.insert(late); ctx.insert(early)
+    try ctx.save()
+
+    _ = try ledger.snapshot(for: 20260728, activeItems: [a, b])
+
+    let key = 20260728
+    let remaining = try ctx.fetch(
+        FetchDescriptor<DaySnapshot>(predicate: #Predicate { $0.dayKey == key })
+    )
+    #expect(remaining.count == 2, "并集绝不删除任何源快照，否则自愈能力尽失")
+}
+
+@MainActor
 @Test func 排除已归档的定课项() throws {
     let (ledger, ctx) = try makeEnv()
     let a = PracticeItem(name: "念佛")
