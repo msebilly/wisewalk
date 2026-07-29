@@ -94,17 +94,28 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
 
 @MainActor
 @Test func 按用户拖拽的顺序显示而不是按uuid() throws {
-    // DayPlan.requiredItemIDs 是按 uuidString 排的（为了跨设备逐位一致），
-    // 直接拿来显示会让用户看到一个每次都可能不同、且与他自己排的顺序无关的清单。
+    // DayPlan.requiredItemIDs 在**已有快照**时是按 uuidString 排的
+    // （`DayLedger.merge`：多设备并集要逐位一致），直接拿来显示，
+    // 用户看到的清单就与他自己排的顺序无关。
+    //
+    // **必须 reload 两次。** 第一次库里还没有快照，`plan` 走新建路径，
+    // `requiredItemIDs` 是 `required.map(\.id)`——本来就是拖拽序，
+    // 排序代码在这条路上是个 no-op，删掉它这条测试照样绿。
+    // 第二次才走 `existingPlan → merge`，那里才有 uuidString 排序。
     let (vm, items, _, _) = try makeToday()
     let a = try items.create(from: TemplateCatalog.template(key: "chanting")!)
     let b = try items.create(from: TemplateCatalog.template(key: "mantra")!)
     let c = try items.create(from: TemplateCatalog.template(key: "sutra")!)
-    try items.reorder([c, a, b])
+
+    // UUID 每次运行都不同。若把拖拽序写成固定的字面量，三项就有 1/6 的概率
+    // 碰巧与 uuidString 序一致，这条测试会间歇性地什么都测不出来。
+    // 取 uuidString 序的**倒序**当拖拽序，二者必然不同。
+    let dragged = Array([a, b, c].sorted { $0.id.uuidString < $1.id.uuidString }.reversed())
+    try items.reorder(dragged)
 
     try vm.reload(now: 北京(7, 28, 9, 0), timeZone: 北京时间)
-    #expect(vm.rows.map(\.name) == ["诵经", "念佛", "持咒"])
-    _ = (a, b, c)
+    try vm.reload(now: 北京(7, 28, 9, 0), timeZone: 北京时间)
+    #expect(vm.rows.map(\.name) == dragged.map(\.name))
 }
 
 @MainActor
