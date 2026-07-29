@@ -113,30 +113,46 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
 }
 
 @MainActor
-@Test func 并集顺序确定() throws {
-    // 两台设备插入次序相反，也必须产出逐位相同的 requiredItemIDs 数组，
-    // 否则「跨设备一致」只是口号。故并集按 uuidString 排序。
-    let a = PracticeItem(name: "念佛", dailyGoal: 1000)
-    let b = PracticeItem(name: "打坐", measureType: .duration, dailyGoal: 1800)
+@Test func 并集严格按uuidString升序而非到达次序() throws {
+    // 两台设备收到同一组 DaySnapshot，无论到达次序、无论 Set 迭代次序，
+    // 都必须产出**逐位相同**的 requiredItemIDs，否则「跨设备一致」只是口号。
+    //
+    // 用显式 UUID 钉死期望，并刻意打乱各项在快照里的出现次序（既非升序也非插入序）：
+    // 若并集按到达/Set 迭代次序拼接，几乎不可能恰好排成升序；
+    // 唯有真正按 uuidString 排序才得到 [u1…u6]。故断言与「排序后的期望」**逐位相等**——
+    // 不是集合相等，也不是「两次运行彼此相等」：后两者对任何确定性算法（含完全不排序）恒真，
+    // 根本约束不住排序。多用几个 UUID 是为了让「删掉 .sorted」几乎必然被逮到（1/6! 才会侥幸蒙混）。
+    let u1 = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+    let u2 = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+    let u3 = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+    let u4 = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+    let u5 = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
+    let u6 = UUID(uuidString: "66666666-6666-6666-6666-666666666666")!
+    let 期望 = [u1, u2, u3, u4, u5, u6]
 
-    func runMerged(insertLateFirst: Bool) throws -> [UUID] {
+    func merged(insertLateFirst: Bool) throws -> [UUID] {
         let container = try ModelContainerFactory.inMemory()
         let ctx = ModelContext(container)
         let ledger = DayLedger(context: ctx, deviceName: "iPhone·TEST")
-        let early = DaySnapshot(dayKey: 20260728, requiredItemIDs: [a.id],
-                                goals: [a.id.uuidString: 1000],
+        // 各项在快照里刻意乱序出现（靠后的先登场），自然累加序 u6,u3,u1,u5,u2,u4 ≠ 升序。
+        let early = DaySnapshot(dayKey: 20260728, requiredItemIDs: [u6, u3, u1],
+                                goals: [:],
                                 createdAt: Date(timeIntervalSince1970: 1000))
-        let late = DaySnapshot(dayKey: 20260728, requiredItemIDs: [a.id, b.id],
-                               goals: [b.id.uuidString: 1800],
+        let late = DaySnapshot(dayKey: 20260728, requiredItemIDs: [u5, u2, u4, u6],
+                               goals: [:],
                                createdAt: Date(timeIntervalSince1970: 2000))
         if insertLateFirst { ctx.insert(late); ctx.insert(early) }
         else { ctx.insert(early); ctx.insert(late) }
         try ctx.save()
-        return try ledger.plan(for: 20260728, activeItems: [a, b]).requiredItemIDs
+        return try #require(try ledger.existingPlan(for: 20260728)).requiredItemIDs
     }
 
-    #expect(try runMerged(insertLateFirst: true) == (try runMerged(insertLateFirst: false)),
-            "并集顺序必须与插入次序无关")
+    // 核心断言：结果必须严格等于 uuidString 升序数组；到达/迭代次序不得泄漏进来。
+    #expect(try merged(insertLateFirst: true) == 期望,
+            "并集必须严格按 uuidString 升序，删掉 .sorted 即会泄漏 Set/到达次序")
+    // 附加：到达次序无关（保留原意，但不再是唯一断言）。
+    #expect(try merged(insertLateFirst: false) == 期望,
+            "颠倒插入次序也必须得到同一逐位相同的数组")
 }
 
 @MainActor
