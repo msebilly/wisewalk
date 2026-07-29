@@ -106,6 +106,12 @@ final class PracticeItemStore {
     /// **改目标值不影响历史圆满判定**：过去每天的目标定格在 `DaySnapshot` 里，
     /// 由 `DayLedger.plan(for:)` 的「已存在快照绝不改写」守着。此处只管当前配置。
     /// （§6.6 要求这一点在 UI 上明示，否则用户会担心「改了目标以前的记录是不是就废了」。）
+    ///
+    /// **不收 `scheduleRule` 与 `reminderTimes` 是故意的**——这一卷没有任何界面能设它们，
+    /// 不收就等于「原样保留」。将来加排期/提醒界面时，请把它们加成**必填**参数，
+    /// 不要图省事写成 `scheduleRule: ScheduleRule = .daily, reminderTimes: [Int] = []`：
+    /// 定课管理页每次改名换色都调这个方法，带默认值就等于用户每编辑一次
+    /// 就被静默抹掉一次已设好的提醒，而且不报错、不留痕。
     func update(
         _ item: PracticeItem,
         name: String,
