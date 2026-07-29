@@ -81,12 +81,18 @@ final class CounterViewModel {
         dayStartHour: Int = 0,
         timeZone: TimeZone = .current
     ) throws {
+        // 会抛的两步先走完，一个字段都不动；全过了再一次性落到自己身上。
+        // 抢在前面赋值的话，`ledger.total` 抛错时会留下「设置是新的、
+        // committedDayKey 还是旧的」这种半新半旧的状态——它算不出崩溃，
+        // 只会让屏幕上的今日悄悄偏一点，而这正是最难查的那种偏。
+        let dayKey = DayKey.today(dayStartHour: dayStartHour, now: now, timeZone: timeZone)
+        let total = try ledger.total(on: dayKey, itemID: item.id)
+        let existing = try drafts.begin(itemID: item.id, source: .counter, at: now)
+
         self.dayStartHour = dayStartHour
         self.timeZone = timeZone
-        let dayKey = DayKey.today(dayStartHour: dayStartHour, now: now, timeZone: timeZone)
-        committedTotal = try ledger.total(on: dayKey, itemID: item.id)
         committedDayKey = dayKey
-        let existing = try drafts.begin(itemID: item.id, source: .counter, at: now)
+        committedTotal = total
         draft = existing
         count = existing.amount
     }

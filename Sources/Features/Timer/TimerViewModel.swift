@@ -9,9 +9,23 @@ import Observation
 @MainActor
 @Observable
 final class TimerViewModel {
-    /// 心跳间隔。**崩溃后能损失的时长上限就是它**——
-    /// 恢复时按最后一次心跳推算（见 `DraftRecovery`），心跳越密误差越小、写盘越频。
-    /// 10 秒是个折中：最坏少记 10 秒，而一次写盘的开销实测远在一帧之下。
+    /// 心跳间隔：每 10 秒把「App 此刻还活着」写进草稿。
+    ///
+    /// ⚠️ **10 秒不是崩溃能损失的时长上限。** 心跳由 Task 16 的
+    /// `Timer.publish(every: 1, on: .main, in: .common)` 驱动，而那个 Timer
+    /// **一进后台就停**。用户起坐、锁屏、把手机放在一边坐半小时——心跳在锁屏后
+    /// 几秒就断了，草稿的 `updatedAt` 从此定格。这半小时里 App 若被系统回收
+    /// （长时间后台、又没有音频会话，打坐恰恰是最容易被回收的场景），
+    /// 下次启动 `DraftRecovery.suggestedAmount` 只能按定格的 `updatedAt` 推算，
+    /// **整整半小时只剩十来秒**；而恢复弹窗只有「接受」和「拒绝」，改不了数。
+    ///
+    /// 真正的上限是「最后一次进入后台之后坐的那一段」。
+    /// 不按「现在」推算是**故意**的——App 可能崩在三天前，用「现在」会给用户
+    /// 记上 72 小时的打坐，那是「多」，比「丢」坏得多。这里方向是「丢」，
+    /// 用户看得见（弹窗上的数字明显偏小），可以走补记（Task 11）补齐。
+    /// 要根治得申请后台执行权限，**本卷不做**。
+    ///
+    /// 10 秒这个值本身管的是另一件事：**前台**打坐时被回收能损失多少。
     static let heartbeatInterval: TimeInterval = 10
 
     private(set) var elapsed: Int = 0
@@ -76,12 +90,18 @@ final class TimerViewModel {
         dayStartHour: Int = 0,
         timeZone: TimeZone = .current
     ) throws {
+        // 会抛的两步先走完，一个字段都不动；全过了再一次性落到自己身上。
+        // 抢在前面赋值的话，`ledger.total` 抛错时会留下「设置是新的、
+        // committedDayKey 还是旧的」这种半新半旧的状态——它算不出崩溃，
+        // 只会让屏幕上的今日悄悄偏一点，而这正是最难查的那种偏。
+        let dayKey = DayKey.today(dayStartHour: dayStartHour, now: now, timeZone: timeZone)
+        let total = try ledger.total(on: dayKey, itemID: item.id)
+        let existing = try drafts.begin(itemID: item.id, source: .timer, at: now)
+
         self.dayStartHour = dayStartHour
         self.timeZone = timeZone
-        let dayKey = DayKey.today(dayStartHour: dayStartHour, now: now, timeZone: timeZone)
-        committedTotal = try ledger.total(on: dayKey, itemID: item.id)
         committedDayKey = dayKey
-        let existing = try drafts.begin(itemID: item.id, source: .timer, at: now)
+        committedTotal = total
         draft = existing
         startedAt = existing.startedAt
         lastHeartbeat = existing.updatedAt
