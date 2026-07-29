@@ -43,7 +43,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
 
 @MainActor
 @Test func 新建的排到末尾() throws {
-    let (store, _, _) = try makeItemStore()
+    let (store, _, ctx) = try makeItemStore()
     let a = try store.create(from: TemplateCatalog.template(key: "chanting")!)
     let b = try store.create(from: TemplateCatalog.template(key: "mantra")!)
     let c = try store.create(from: TemplateCatalog.template(key: "sutra")!)
@@ -52,19 +52,72 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     // `ExpressibleByArrayLiteral<Int>`，泛型参数在三者之间歧义，编译不过。
     #expect([a.sortOrder, b.sortOrder, c.sortOrder] as [Int] == [0, 1, 2])
     #expect(try store.activeItems().map(\.name) == ["念佛", "持咒", "诵经"])
+    #expect(!ctx.hasChanges, "create 之后不该还有没落盘的改动")
 }
 
 @MainActor
 @Test func 新建排序时把已归档的也算进去() throws {
     // 否则归档一项再新建，新项会和某个已归档项抢同一个 sortOrder，
     // 用户把归档项恢复回来时两者顺序就成了掷骰子。
-    let (store, _, _) = try makeItemStore()
+    //
+    // 归档项的 sortOrder 特意留出空档（0 之后直接跳到 5）：连续排布下
+    // 「取最大值 +1」与「数个数」得数相同，测不出二者之别，
+    // 而后者正是这条测试要挡住的写法。
+    let (store, _, ctx) = try makeItemStore()
     let a = try store.create(from: TemplateCatalog.template(key: "chanting")!)
-    let b = try store.create(from: TemplateCatalog.template(key: "mantra")!)
-    try store.archive(b)
+    ctx.insert(PracticeItem(name: "早就归档的", sortOrder: 5, isArchived: true,
+                            createdAt: 北京(7, 1, 8, 0)))
+    try ctx.save()
     let c = try store.create(from: TemplateCatalog.template(key: "sutra")!)
-    #expect(c.sortOrder == 2, "应当续在已归档项之后，实际 \(c.sortOrder)")
+    #expect(c.sortOrder == 6, "应当续在已归档项之后，实际 \(c.sortOrder)")
     #expect(a.sortOrder != c.sortOrder)
+}
+
+@MainActor
+@Test func 记过功课的定课改不了量法() throws {
+    // 立身之本：已经记下的功课不许被事后重新解释。
+    // amount 是个裸 Int，不记自己的单位——打坐每笔 1800 秒，
+    // 量法一改成计数就当场变成「1800 遍」，用户从没念过的数字。
+    let (store, ledger, _) = try makeItemStore()
+    let item = try store.create(from: TemplateCatalog.template(key: "meditation")!)
+    let now = 北京(7, 28, 6, 0)
+    try ledger.record(item: item, amount: 1800, source: .timer,
+                      startedAt: 北京(7, 28, 5, 30), at: now, timeZone: 北京时间)
+
+    #expect(throws: PracticeItemStoreError.measureTypeLockedByHistory) {
+        try store.update(item, name: "打坐", measureType: .count, unit: "遍",
+                         dailyGoal: nil, iconName: item.iconName,
+                         colorHex: item.colorHex, at: now)
+    }
+    // 掷错之后一个字段都不许动过——不能改了一半才发现不让改。
+    #expect(item.measureType == .duration)
+    #expect(item.unit == "")
+}
+
+@MainActor
+@Test func 没记过功课的定课可以改量法() throws {
+    // 刚建错了量法还没记过，本来就该让人改回来。
+    let (store, _, _) = try makeItemStore()
+    let item = try store.create(from: TemplateCatalog.template(key: "meditation")!)
+    try store.update(item, name: "打坐", measureType: .count, unit: "坐",
+                     dailyGoal: nil, iconName: item.iconName,
+                     colorHex: item.colorHex, at: 北京(7, 28, 9, 0))
+    #expect(item.measureType == .count)
+    #expect(item.unit == "坐")
+}
+
+@MainActor
+@Test func 有历史也照样能改名换色只是量法照旧() throws {
+    // 锁的只是量法这一个字段，别把整个编辑页一起锁死了。
+    let (store, ledger, _) = try makeItemStore()
+    let item = try store.create(from: TemplateCatalog.template(key: "chanting")!)
+    let now = 北京(7, 28, 9, 0)
+    try ledger.record(item: item, amount: 1000, source: .counter,
+                      startedAt: now, at: now, timeZone: 北京时间)
+    try store.update(item, name: "念佛（改）", measureType: .count, unit: "声",
+                     dailyGoal: 3000, iconName: "star", colorHex: "#123456", at: now)
+    #expect(item.name == "念佛（改）")
+    #expect(item.dailyGoal == 3000)
 }
 
 @MainActor
@@ -138,13 +191,17 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
 
 @MainActor
 @Test func 拖拽排序按传入顺序重排() throws {
-    let (store, _, _) = try makeItemStore()
+    let (store, _, ctx) = try makeItemStore()
     let a = try store.create(from: TemplateCatalog.template(key: "chanting")!)
     let b = try store.create(from: TemplateCatalog.template(key: "mantra")!)
     let c = try store.create(from: TemplateCatalog.template(key: "sutra")!)
     try store.reorder([c, a, b])
     #expect(try store.activeItems().map(\.name) == ["诵经", "念佛", "持咒"])
     #expect([c.sortOrder, a.sortOrder, b.sortOrder] as [Int] == [0, 1, 2])
+    // 钉住那句 save()。少了它，本文件其余断言一条都不会红：
+    // makeItemStore 只发一个 ModelContext，而 FetchDescriptor 的
+    // includePendingChanges 默认为 true，未落盘的改动照样查得到。
+    #expect(!ctx.hasChanges, "reorder 之后不该还有没落盘的改动")
 }
 
 @MainActor

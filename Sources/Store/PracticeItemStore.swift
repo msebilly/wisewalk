@@ -1,6 +1,11 @@
 import Foundation
 import SwiftData
 
+enum PracticeItemStoreError: Error, Equatable {
+    /// 已经记过功课的定课不许改量法——旧流水的 `amount` 会被按新量法重新解释。
+    case measureTypeLockedByHistory
+}
+
 /// 定课项的唯一写入口。
 ///
 /// **本类型不提供删除方法——不是忘了写，是刻意不给。**
@@ -53,6 +58,11 @@ final class PracticeItemStore {
 
     /// 新建。`sortOrder` 排到**所有**定课（含已归档）之后——
     /// 只看活跃项的话，归档一项再新建就会撞号，用户把归档项恢复回来时顺序全乱。
+    ///
+    /// 注意这只保证**新建那一刻**不撞号，不是全局不变量：`reorder` 收的是
+    /// 定课管理页上看得见的活跃子集，把它们重排成 `0..<n`，照样会与归档项的旧号相撞。
+    /// 可以接受，因为三个 fetch 都带 `SortDescriptor(\.createdAt)` 兜底，
+    /// 撞号时顺序是定的而非掷骰子，且用户下次拖拽即自愈。
     @discardableResult
     func create(
         name: String,
@@ -103,6 +113,16 @@ final class PracticeItemStore {
 
     /// 改当前配置。
     ///
+    /// **有历史的定课改不了量法，会掷 `.measureTypeLockedByHistory`。**
+    /// `PracticeSession.amount` 是个裸 `Int`，不记自己的单位——计数类当遍数、
+    /// 计时类当秒、打勾类恒为 1，全靠定课**当前**的 `measureType` 解释。
+    /// 把打坐从计时改成计数，过去一个月每笔 1800 秒会当场显示成「1800 遍」，
+    /// 一个用户从没念过的数字。这与「本类型不提供删除方法」是同一条理由：
+    /// 已经记下的功课不许被事后重新解释。要换量法就新建一项、旧项归档，
+    /// 旧项的历史便永远按原样标注。
+    ///
+    /// 没有任何历史时放行——刚建错了量法还没记过，本来就该让人改回来。
+    ///
     /// **改目标值不影响历史圆满判定**：过去每天的目标定格在 `DaySnapshot` 里，
     /// 由 `DayLedger.plan(for:)` 的「已存在快照绝不改写」守着。此处只管当前配置。
     /// （§6.6 要求这一点在 UI 上明示，否则用户会担心「改了目标以前的记录是不是就废了」。）
@@ -122,6 +142,9 @@ final class PracticeItemStore {
         colorHex: String,
         at now: Date = Date()
     ) throws {
+        if measureType != item.measureType, try hasAnyHistory(item) {
+            throw PracticeItemStoreError.measureTypeLockedByHistory
+        }
         item.name = name
         item.measureType = measureType
         item.unit = unit
@@ -151,5 +174,24 @@ final class PracticeItemStore {
             item.updatedAt = now
         }
         try context.save()
+    }
+
+    // MARK: - 内部
+
+    /// 这一项有没有记过哪怕一笔功课。
+    ///
+    /// 不是 `private`：编辑页要靠它把量法选择器**先禁用掉**，
+    /// 不能让用户改完点保存才撞上 `.measureTypeLockedByHistory`。
+    ///
+    /// 存心只查存在性、只取一条，不经 `DayLedger`——`DayLedger` 是账本的**写**入口，
+    /// 这里一个字都不写。真要走它就得把 `DayLedger` 注入本类型的构造器，
+    /// 而本类型有十来个构造点，为一次存在性查询换掉全部签名不划算。
+    func hasAnyHistory(_ item: PracticeItem) throws -> Bool {
+        let itemID = item.id
+        var descriptor = FetchDescriptor<PracticeSession>(
+            predicate: #Predicate { $0.item?.id == itemID }
+        )
+        descriptor.fetchLimit = 1
+        return try !context.fetch(descriptor).isEmpty
     }
 }
