@@ -19,7 +19,18 @@ enum DraftRecovery {
     ) -> Int {
         switch source {
         case .timer:
-            return max(0, Int(updatedAt.timeIntervalSince(startedAt).rounded()))
+            // 用 `Int(exactly:)` 而不是 `Int(_:)`——后者是会 trap 的转换，
+            // 超出 `Int.max`、NaN、无穷大都直接 abort 进程。
+            // 这个函数跑在**启动路径**上（`RecoveryCoordinator.runAtLaunch`），
+            // 一旦 trap 就是「App 再也打不开」，而且草稿在启动失败时根本没机会被清掉，
+            // 于是每次启动都崩在同一处——恰恰是这个 App 唯一不能出的事。
+            //
+            // 真实设备产生不了这么大的间隔：`distantPast` 到 `distantFuture` 也才
+            // 1.26e11 秒，离 `Int.max` 的 9.2e18 差八个数量级。只有草稿库那一列
+            // 真被写坏时才会踩到。两行换掉一个不可恢复的故障，值。
+            let interval = updatedAt.timeIntervalSince(startedAt).rounded()
+            guard interval > 0, let seconds = Int(exactly: interval) else { return 0 }
+            return seconds
         case .counter, .manual, .adjustment:
             return max(0, amount)
         }
