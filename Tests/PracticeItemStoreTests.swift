@@ -78,32 +78,48 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     // 立身之本：已经记下的功课不许被事后重新解释。
     // amount 是个裸 Int，不记自己的单位——打坐每笔 1800 秒，
     // 量法一改成计数就当场变成「1800 遍」，用户从没念过的数字。
-    let (store, ledger, _) = try makeItemStore()
+    let (store, ledger, ctx) = try makeItemStore()
     let item = try store.create(from: TemplateCatalog.template(key: "meditation")!)
     let now = 北京(7, 28, 6, 0)
     try ledger.record(item: item, amount: 1800, source: .timer,
                       startedAt: 北京(7, 28, 5, 30), at: now, timeZone: 北京时间)
 
+    // 每个字段都传与现值不同的值：逐字段断言才有意义。
     #expect(throws: PracticeItemStoreError.measureTypeLockedByHistory) {
-        try store.update(item, name: "打坐", measureType: .count, unit: "遍",
-                         dailyGoal: nil, iconName: item.iconName,
-                         colorHex: item.colorHex, at: now)
+        try store.update(item, name: "打坐（改）", measureType: .count, unit: "遍",
+                         dailyGoal: 3000, iconName: "star", colorHex: "#123456", at: now)
     }
     // 掷错之后一个字段都不许动过——不能改了一半才发现不让改。
+    // 逐字段断言只钉得住「守卫在这几个赋值之前」；`!ctx.hasChanges` 钉的是
+    // 「守卫在**所有**赋值之前」，把守卫往下挪哪怕一行都会红。
     #expect(item.measureType == .duration)
+    #expect(item.name == "打坐")
     #expect(item.unit == "")
+    #expect(item.dailyGoal == nil)
+    #expect(!ctx.hasChanges, "掷错之后不该留下任何没落盘的改动")
 }
 
 @MainActor
 @Test func 没记过功课的定课可以改量法() throws {
     // 刚建错了量法还没记过，本来就该让人改回来。
-    let (store, _, _) = try makeItemStore()
-    let item = try store.create(from: TemplateCatalog.template(key: "meditation")!)
-    try store.update(item, name: "打坐", measureType: .count, unit: "坐",
-                     dailyGoal: nil, iconName: item.iconName,
-                     colorHex: item.colorHex, at: 北京(7, 28, 9, 0))
-    #expect(item.measureType == .count)
-    #expect(item.unit == "坐")
+    //
+    // 库里**另有**一项记满了流水，这不是布景：`hasAnyHistory` 的谓词
+    // 穿透可选关系（`$0.item?.id == itemID`），而 `DayLedger.sessions(on:itemID:)`
+    // 的注释里写明这种形状「在 SwiftData 上行为不稳」并刻意改走内存过滤。
+    // 谓词一旦失准，把念佛的流水算到打坐头上，这条就红。
+    // 少了这第二项，把谓词整个删成 `FetchDescriptor<PracticeSession>()` 都测不出来。
+    let (store, ledger, _) = try makeItemStore()
+    let chanting = try store.create(from: TemplateCatalog.template(key: "chanting")!)
+    let now = 北京(7, 28, 9, 0)
+    try ledger.record(item: chanting, amount: 1000, source: .counter,
+                      startedAt: now, at: now, timeZone: 北京时间)
+
+    let meditation = try store.create(from: TemplateCatalog.template(key: "meditation")!)
+    try store.update(meditation, name: "打坐", measureType: .count, unit: "坐",
+                     dailyGoal: nil, iconName: meditation.iconName,
+                     colorHex: meditation.colorHex, at: now)
+    #expect(meditation.measureType == .count)
+    #expect(meditation.unit == "坐")
 }
 
 @MainActor

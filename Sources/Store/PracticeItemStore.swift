@@ -1,9 +1,20 @@
 import Foundation
 import SwiftData
 
-enum PracticeItemStoreError: Error, Equatable {
+enum PracticeItemStoreError: Error, LocalizedError, Equatable {
     /// 已经记过功课的定课不许改量法——旧流水的 `amount` 会被按新量法重新解释。
     case measureTypeLockedByHistory
+
+    /// 这是用户**唯一够得着**的一条错误路径：编辑页的量法选择器本该先禁用，
+    /// 只有「编辑页开着时 CloudKit 远端合进一笔流水」才走得到这儿。
+    /// 正因为它是最后一道防线，这句话必须是人话——不写就会显示成
+    /// 「The operation couldn't be completed. (WiseWalk.PracticeItemStoreError error 0.)」。
+    var errorDescription: String? {
+        switch self {
+        case .measureTypeLockedByHistory:
+            return "已经记过功课，计量方式不能再改。要换记法请新建一项，这一项归档即可——过去的记录会照原样保留。"
+        }
+    }
 }
 
 /// 定课项的唯一写入口。
@@ -122,6 +133,12 @@ final class PracticeItemStore {
     /// 旧项的历史便永远按原样标注。
     ///
     /// 没有任何历史时放行——刚建错了量法还没记过，本来就该让人改回来。
+    ///
+    /// 守卫的判据是 `measureType != item.measureType`，而 `measureType` 是从
+    /// `measureTypeRaw` 读出来的**有损**计算属性（`MeasureType(rawValue:) ?? .count`）。
+    /// 今天够不着：三个 case，所有写入都走 `rawValue`。**但加第四个 case 之前先回来看这里**——
+    /// 老版本读到不认识的 raw 会当成 `.count`，用户在老设备上「改个名」就把那个 raw
+    /// 静默覆盖掉再同步回新设备，而守卫是相等比较，全程不触发。
     ///
     /// **改目标值不影响历史圆满判定**：过去每天的目标定格在 `DaySnapshot` 里，
     /// 由 `DayLedger.plan(for:)` 的「已存在快照绝不改写」守着。此处只管当前配置。

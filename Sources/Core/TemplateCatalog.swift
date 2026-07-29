@@ -29,10 +29,12 @@ enum TemplateCatalog {
         .init(key: "sutra",      name: "诵经",     measureType: .count,    unit: "遍", iconName: "book"),
         .init(key: "prostrate",  name: "拜佛",     measureType: .count,    unit: "拜", iconName: "figure.stand"),
         .init(key: "meditation", name: "打坐",     measureType: .duration, unit: "",   iconName: "figure.mind.and.body"),
-        // 抄经 spec 写的是「计时或计数」，这里给计时作默认，用户可在编辑页改。
+        // 抄经 spec 写的是「计时或计数」，这里给计时作默认。
+        // **只在还没记过功课之前改得动**——记过之后 `PracticeItemStore.update` 会锁死量法，
+        // 否则过去每笔的秒数会被当成遍数重新解释。想换记法就新建一项、这项归档。
         .init(key: "copying",    name: "抄经",     measureType: .duration, unit: "",   iconName: "pencil.and.outline"),
         .init(key: "offering",   name: "供养",     measureType: .check,    unit: "",   iconName: "flame"),
-        // 放生布施 spec 写的是「勾选或计数」，这里给勾选作默认。
+        // 放生布施 spec 写的是「勾选或计数」，这里给勾选作默认。同样只在记过功课之前改得动。
         .init(key: "release",    name: "放生布施", measureType: .check,    unit: "",   iconName: "leaf")
     ]
 
