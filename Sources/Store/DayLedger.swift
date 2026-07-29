@@ -24,6 +24,12 @@ final class DayLedger {
     ///
     /// - Parameter id: 预生成编号。崩溃恢复时传入草稿里的编号，
     ///   本方法会先查重，已入账则直接返回既有记录，不会重复计数。
+    /// - Parameter onDay: 手动补记到**指定历史日期**时传入该日的 dayKey；为 nil 时按
+    ///   `at:`/`dayStartHour`/`timeZone` 推导当天（现有行为不变）。
+    ///   刻意与 `at:` 分开：§6.4 规定补记的 `dayKey` 为**所选日期**，而 `createdAt`
+    ///   始终是**真实写入时刻**、`tzOffsetMinutes` 为**当前**偏移。「功课发生在哪天」
+    ///   与「这条何时写下」是两件事，若靠回拨 `at:` 来补记，会连带篡改 createdAt
+    ///   （快照去重排序与第 3 卷诊断都依赖它）与历史时区偏移。
     @discardableResult
     func record(
         item: PracticeItem,
@@ -35,7 +41,8 @@ final class DayLedger {
         dayStartHour: Int = 0,
         timeZone: TimeZone = .current,
         id: UUID = UUID(),
-        note: String? = nil
+        note: String? = nil,
+        onDay: Int? = nil
     ) throws -> PracticeSession {
         if let existing = try fetch(sessionID: id) {
             return existing
@@ -45,7 +52,7 @@ final class DayLedger {
         let session = PracticeSession(
             id: id,
             item: item,
-            dayKey: DayKey.make(from: now, tzOffsetMinutes: offset, dayStartHour: dayStartHour),
+            dayKey: onDay ?? DayKey.make(from: now, tzOffsetMinutes: offset, dayStartHour: dayStartHour),
             tzOffsetMinutes: offset,
             amount: amount,
             startedAt: startedAt,

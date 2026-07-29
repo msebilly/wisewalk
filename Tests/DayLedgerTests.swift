@@ -225,3 +225,32 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
 
     #expect(try ledger.total(on: 20260728, itemID: sit.id) == 2700)
 }
+
+@MainActor
+@Test func 补记到指定日期而写入时间仍为当下() throws {
+    // §6.4：dayKey 为所选日期，但 createdAt 必须是真实写入时刻、tzOffsetMinutes 为当前偏移。
+    // 「功课发生在哪天」与「这条何时写下」是两件事，不能挤进同一个 at: 参数——
+    // 否则补记上周二会连带伪造 createdAt（快照去重排序与第 3 卷诊断都靠它）。
+    let (ledger, _, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+    let s = try ledger.record(item: item, amount: 108, source: .manual,
+                              startedAt: now, endedAt: now, at: now,
+                              timeZone: 北京时间, onDay: 20260721)
+
+    #expect(s.dayKey == 20260721, "应落在所选日期")
+    #expect(s.createdAt == now, "createdAt 必须是真实写入时刻，不能被补记日期篡改")
+    #expect(s.tzOffsetMinutes == 480, "tzOffsetMinutes 为当前时区偏移")
+    #expect(try ledger.total(on: 20260721, itemID: item.id) == 108, "计入所选日期")
+    #expect(try ledger.total(on: 20260728, itemID: item.id) == 0, "不得混进今天的总数")
+}
+
+@MainActor
+@Test func 不指定补记日期时沿用旧行为() throws {
+    // 回归护栏：省略 onDay: 时 dayKey 仍由 at:/dayStartHour/timeZone 推导。
+    let (ledger, _, item) = try makeLedger()
+    let now = 北京(7, 28, 23, 30)
+    let s = try ledger.record(item: item, amount: 1, source: .counter,
+                              startedAt: now, endedAt: now, at: now, timeZone: 北京时间)
+    #expect(s.dayKey == 20260728)
+    #expect(s.createdAt == now)
+}
