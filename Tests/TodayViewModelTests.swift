@@ -177,6 +177,37 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
 }
 
 @MainActor
+@Test func 缺的定课同步下来之后自己就好了() throws {
+    // 「同步补齐后自愈」是整个降级方案的正当性依据——因为它自愈，
+    // 我们才敢在同步窗口内说「未圆满」而不是想办法猜。这条依据必须有测试守着。
+    // 否则哪天有人把赋值改成「只增不清空」，用户明明做完了，App 永远不认。
+    let (vm, items, ledger, ctx) = try makeToday()
+    let 念佛 = try items.create(from: TemplateCatalog.template(key: "chanting")!)
+    let now = 北京(7, 28, 9, 0)
+    try ledger.record(item: 念佛, amount: 100, source: .counter,
+                      startedAt: now, at: now, timeZone: 北京时间)
+
+    let 幽灵 = UUID()
+    ctx.insert(DaySnapshot(dayKey: 20260728,
+                           requiredItemIDs: [念佛.id, 幽灵],
+                           goals: [念佛.id.uuidString: 100]))
+    try ctx.save()
+    try vm.reload(now: now, timeZone: 北京时间)
+    #expect(!vm.isFulfilled, "前提：这会儿还缺一项")
+
+    // 拜佛这条 PracticeItem 终于从 iCloud 落到本机了。
+    ctx.insert(PracticeItem(id: 幽灵, name: "拜佛", sortOrder: 1))
+    try ctx.save()
+    try vm.reload(now: now, timeZone: 北京时间)
+
+    #expect(vm.unresolvedItemIDs.isEmpty, "补齐了就不该再挂着")
+    #expect(vm.rows.count == 2)
+    #expect(vm.requiredCount == 2)
+    #expect(!vm.isFulfilled, "自愈是把它显示出来，不是替他做完")
+    #expect(vm.rows.contains { $0.name == "拜佛" && $0.state == .pending })
+}
+
+@MainActor
 @Test func 一项都没同步下来时是未圆满而不是无课日() throws {
     // rows 全空。若拿 rows.isEmpty 推「无课」，这一天会被判成
     // 不计入分母、不中断连续天数——等于替用户抹掉一天的欠账。
@@ -215,7 +246,6 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     #expect(vm.dayKey == 20260729)
     #expect(vm.rows.count == 1, "只唠叨到当天为止")
     #expect(vm.rows[0].name == "念佛")
-    #expect(vm.unresolvedItemIDs.isEmpty, "第二天的新快照压根不该登记它")
 }
 
 @MainActor
