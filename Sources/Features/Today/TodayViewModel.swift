@@ -55,11 +55,13 @@ final class TodayViewModel {
     var requiredCount: Int { rows.count + unresolvedItemIDs.count }
 
     /// §6.8 三态之一：**应做集合**为空叫无课，不计入分母，也不中断。
+    /// 用户什么都没安排的日子不该被记一笔失败。
     ///
     /// 判据是应做集合而不是 `rows`——§6.8 的原话就是「应做集合为空」，
     /// 而 `rows` 只是其中**画得出来**的那部分。同步窗口内两者会分家。
     var isRestDay: Bool { requiredCount == 0 }
 
+    /// 应做的都达标了。无课日**不算**圆满——那是另一种状态。
     /// 有项目还没同步到本机时一律不算圆满：它们做没做，本机根本不知道。
     var isFulfilled: Bool {
         requiredCount > 0 && unresolvedItemIDs.isEmpty

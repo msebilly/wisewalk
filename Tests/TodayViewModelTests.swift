@@ -197,6 +197,14 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
 
 @MainActor
 @Test func 第二天归档的功课就不再出现() throws {
+    // 说明：**没有任何单点变异能打红这一条**，因为「归档的第二天不再出现」
+    // 由两层冗余各自独立保证——`reload` 只取 `activeItems()`，
+    // 而 `DayLedger.plan` 建快照时又 `filter { !$0.isArchived }` 了一次。
+    // 拆掉任意一层，另一层兜住；两层同时拆才红。
+    //
+    // 留着它是对的：这是端到端的可观察行为，本就不该绑死在某一层的实现上。
+    // 但别误以为它在守 `activeItems()` 那一句——那一句真正的看守是
+    // Task 7 的 `排除已归档的定课项`。
     let (vm, items, _, _) = try makeToday()
     try items.create(from: TemplateCatalog.template(key: "chanting")!)
     let 拜佛 = try items.create(from: TemplateCatalog.template(key: "prostrate")!)
@@ -207,14 +215,6 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     #expect(vm.dayKey == 20260729)
     #expect(vm.rows.count == 1, "只唠叨到当天为止")
     #expect(vm.rows[0].name == "念佛")
-    // 说明：**没有任何单点变异能打红这一条**，因为「归档的第二天不再出现」
-    // 由两层冗余各自独立保证——`reload` 只取 `activeItems()`，
-    // 而 `DayLedger.plan` 建快照时又 `filter { !$0.isArchived }` 了一次。
-    // 拆掉任意一层，另一层兜住；两层同时拆才红。
-    //
-    // 留着它是对的：这是端到端的可观察行为，本就不该绑死在某一层的实现上。
-    // 但别误以为它在守 `activeItems()` 那一句——那一句真正的看守是
-    // Task 7 的 `排除已归档的定课项`。
     #expect(vm.unresolvedItemIDs.isEmpty, "第二天的新快照压根不该登记它")
 }
 
