@@ -70,6 +70,22 @@ final class DayLedger {
         at now: Date = Date(),
         timeZone: TimeZone = .current
     ) throws -> PracticeSession {
+        // 幂等键就是 note 里的 "revoke:<原记录 id>"。
+        // 多设备同撤或崩溃重放会对同一笔重复调用本方法；若不查重，
+        // 第二笔 -amount 会叠加，把同日其他真实流水一起吃掉，再被 clamp 掩盖成「归零」——
+        // 用户真做过的功课就此凭空消失。故仿照 record() 先查重后追加。
+        //
+        // 与 sessions(on:) 同样按 dayKey 取库、内存里过滤：
+        // #Predicate 穿透可选关系不稳，而一天流水至多几十条。
+        let noteKey = "revoke:\(session.id.uuidString)"
+        let key = session.dayKey
+        let sameDay = try context.fetch(
+            FetchDescriptor<PracticeSession>(predicate: #Predicate { $0.dayKey == key })
+        )
+        if let existing = sameDay.first(where: { $0.source == .adjustment && $0.note == noteKey }) {
+            return existing
+        }
+
         let adjustment = PracticeSession(
             item: session.item,
             dayKey: session.dayKey,

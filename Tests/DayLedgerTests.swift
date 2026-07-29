@@ -71,7 +71,8 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
 }
 
 @MainActor
-@Test func 撤销过头时显示归零而账本留痕() throws {
+@Test func 重复撤销同一笔只记一次() throws {
+    // 崩溃重放或多设备同撤：同一笔的 -amount 只能追加一次。
     let (ledger, _, item) = try makeLedger()
     let now = 北京(7, 28, 9, 0)
     let a = try ledger.record(item: item, amount: 500, source: .counter,
@@ -79,8 +80,55 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     try ledger.revoke(a, at: now, timeZone: 北京时间)
     try ledger.revoke(a, at: now, timeZone: 北京时间)
 
+    #expect(try ledger.rawTotal(on: 20260728, itemID: item.id) == 0, "第二次撤销必须被幂等吞掉")
+    let adjustments = try ledger.sessions(on: 20260728, itemID: item.id)
+        .filter { $0.source == .adjustment }
+    #expect(adjustments.count == 1, "同一笔撤销只应留下一条 .adjustment")
+}
+
+@MainActor
+@Test func 撤销不会波及同日其他流水() throws {
+    // 本 finding 的回归测试：S1、S2 是两笔独立真实修行。
+    // 重复撤销 S1 若不幂等，第二笔 -500 会先吃掉 S2 的 300，再被 clamp 掩盖，
+    // 显示归零看似合理，实则凭空抹掉了真做过的 300 声。
+    let (ledger, _, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+    let s1 = try ledger.record(item: item, amount: 500, source: .counter,
+                               startedAt: now, endedAt: now, at: now, timeZone: 北京时间)
+    try ledger.record(item: item, amount: 300, source: .counter,
+                      startedAt: now, endedAt: now, at: now, timeZone: 北京时间)
+
+    try ledger.revoke(s1, at: now, timeZone: 北京时间)
+    try ledger.revoke(s1, at: now, timeZone: 北京时间)
+
+    #expect(try ledger.total(on: 20260728, itemID: item.id) == 300,
+            "重复撤销不得吃掉另一笔真实修行")
+}
+
+@MainActor
+@Test func 孤立的负数调整不被存储层掩盖() throws {
+    // 同步偏序：撤销这笔 .adjustment 先于它的原始正记录抵达本机，
+    // 此刻账本原值理应为负。rawTotal 必须如实暴露，好让同步 bug 看得见；
+    // 只有显示层 displayTotal 才 clamp 到 0。
+    let (ledger, ctx, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+    let orphan = PracticeSession(
+        item: item,
+        dayKey: 20260728,
+        tzOffsetMinutes: 480,
+        amount: -500,
+        startedAt: now,
+        endedAt: now,
+        source: .adjustment,
+        deviceName: "iPad·TEST",
+        note: "revoke:\(UUID().uuidString)",
+        createdAt: now
+    )
+    ctx.insert(orphan)
+    try ctx.save()
+
+    #expect(try ledger.rawTotal(on: 20260728, itemID: item.id) == -500, "账本原值必须如实为负")
     #expect(try ledger.total(on: 20260728, itemID: item.id) == 0, "显示层 clamp 到 0")
-    #expect(try ledger.rawTotal(on: 20260728, itemID: item.id) == -500, "账本保留真实值")
 }
 
 @MainActor
