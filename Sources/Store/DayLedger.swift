@@ -20,7 +20,7 @@ final class DayLedger {
 
     // MARK: - 写
 
-    /// 记一笔。
+    /// 记一笔并**立即落盘**。绝大多数场合用这个。
     ///
     /// - Parameter id: 预生成编号。崩溃恢复时传入草稿里的编号，
     ///   本方法会先查重，已入账则直接返回既有记录，不会重复计数。
@@ -32,6 +32,37 @@ final class DayLedger {
     ///   （快照去重排序与第 3 卷诊断都依赖它）与历史时区偏移。
     @discardableResult
     func record(
+        item: PracticeItem,
+        amount: Int,
+        source: SessionSource,
+        startedAt: Date,
+        endedAt: Date? = nil,
+        at now: Date = Date(),
+        dayStartHour: Int = 0,
+        timeZone: TimeZone = .current,
+        id: UUID = UUID(),
+        note: String? = nil,
+        onDay: Int? = nil
+    ) throws -> PracticeSession {
+        let session = try stage(
+            item: item, amount: amount, source: source,
+            startedAt: startedAt, endedAt: endedAt, at: now,
+            dayStartHour: dayStartHour, timeZone: timeZone,
+            id: id, note: note, onDay: onDay
+        )
+        try context.save()
+        return session
+    }
+
+    /// 把一笔流水放进上下文但**不落盘**，由调用方决定何时 `save()`。
+    ///
+    /// 查重、dayKey 推导、时区落款与 `record` 完全一致——`record` 就是本方法加一句 save。
+    ///
+    /// 存在的唯一理由：`DraftStore.commit` 要让「写流水」与「删草稿」进**同一次 save**
+    /// （§4.5 第 1 条）。**除此之外不要用它**——忘了 save 就等于用户的功课没记上，
+    /// 而且不会有任何报错。
+    @discardableResult
+    func stage(
         item: PracticeItem,
         amount: Int,
         source: SessionSource,
@@ -63,7 +94,6 @@ final class DayLedger {
             createdAt: now
         )
         context.insert(session)
-        try context.save()
         return session
     }
 

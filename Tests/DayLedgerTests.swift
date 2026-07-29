@@ -293,3 +293,54 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     #expect(s.dayKey == 20260728)
     #expect(s.createdAt == now)
 }
+
+@MainActor
+@Test func stage不落盘而record落盘() throws {
+    let (ledger, ctx, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+
+    let staged = try ledger.stage(item: item, amount: 108, source: .counter,
+                                  startedAt: now, at: now, timeZone: 北京时间)
+    #expect(staged.amount == 108)
+    #expect(ctx.hasChanges, "stage 之后应当还有未落盘的改动")
+
+    try ctx.save()
+    #expect(try ledger.total(on: 20260728, itemID: item.id) == 108)
+}
+
+@MainActor
+@Test func stage与record查重逻辑一致() throws {
+    let (ledger, ctx, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+    let id = UUID()
+
+    let first = try ledger.record(item: item, amount: 100, source: .counter,
+                                  startedAt: now, at: now, timeZone: 北京时间, id: id)
+    let again = try ledger.stage(item: item, amount: 100, source: .counter,
+                                 startedAt: now, at: now, timeZone: 北京时间, id: id)
+    try ctx.save()
+
+    #expect(first.id == again.id, "stage 必须和 record 命中同一道查重")
+    #expect(try ledger.sessions(on: 20260728, itemID: item.id).count == 1, "查重失效，记出了第二笔")
+    #expect(try ledger.total(on: 20260728, itemID: item.id) == 100)
+}
+
+@MainActor
+@Test func stage同样支持补记到指定日期() throws {
+    let (ledger, ctx, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+    try ledger.stage(item: item, amount: 50, source: .manual,
+                     startedAt: now, at: now, timeZone: 北京时间, onDay: 20260701)
+    try ctx.save()
+    #expect(try ledger.total(on: 20260701, itemID: item.id) == 50)
+    #expect(try ledger.total(on: 20260728, itemID: item.id) == 0)
+}
+
+@MainActor
+@Test func record仍旧自己落盘不需要调用方再save() throws {
+    let (ledger, ctx, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+    try ledger.record(item: item, amount: 7, source: .counter,
+                      startedAt: now, at: now, timeZone: 北京时间)
+    #expect(!ctx.hasChanges, "record 应当已经落盘，不该留下未保存的改动")
+}
