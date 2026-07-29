@@ -169,15 +169,19 @@ build: gen
 	xcodebuild build -project $(PROJ) -scheme WiseWalk -destination '$(DEST)' -quiet
 
 test: gen
+	@mkdir -p build
 	@set -o pipefail; \
 	xcodebuild test -project $(PROJ) -scheme WiseWalk -destination '$(DEST)' 2>&1 \
-		| tee /tmp/wisewalk-test.log \
+		| tee build/wisewalk-test.log \
 		| grep -E "✔|✘|error:|Executed|TEST (SUCCEEDED|FAILED)" || true
-	@grep -q "TEST SUCCEEDED" /tmp/wisewalk-test.log
+	@grep -q "TEST SUCCEEDED" build/wisewalk-test.log
 
 clean:
 	rm -rf $(PROJ) build .build DerivedData
 ```
+
+> 最后那行 `grep -q` 是这道门的关键：`xcodebuild` 即使测试失败也可能返回 0，
+> 光看退出码会得到永远是绿的假绿灯。已实测：测试失败时 `make test` 退出码为 2。
 
 - [ ] **Step 3: 写 App 入口与占位视图**
 
@@ -362,9 +366,6 @@ import Foundation
 /// 所以每笔流水都随身携带 tzOffsetMinutes，而 dayKey 一旦写入就永不重算——
 /// 用户从北京飞到温哥华，昨天的功课不该跳到前天去。
 enum DayKey {
-    /// 一日起始小时的合法范围。默认 0（午夜），修行人常设 3（凌晨三点）。
-    static let allowedDayStartHours: ClosedRange<Int> = 0...6
-
     private static let utcCalendar: Calendar = {
         var c = Calendar(identifier: .gregorian)
         c.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -488,7 +489,8 @@ import Testing
     #expect(ScheduleRule(rawValue: "weekdays:abc") == .daily)
 }
 
-@Test func 计量方式非法值退化为计数() {
+@Test func 计量方式非法值解析为空() {
+    // 退化为 .count 发生在 PracticeItem.measureType 的读取门面上，不在这里
     #expect(MeasureType(rawValue: "unknown") == nil)
 }
 ```
@@ -614,13 +616,18 @@ git commit -m "feat: 领域枚举与排班规则编解码"
 
 ---
 
-### Task 4: PracticeSession —— append-only 流水
+### Task 4: PracticeSession 与 PracticeItem —— 互相引用的一对
+
+这两个实体**必须同时落地**：`PracticeSession.item` 指向 `PracticeItem`，
+而 `PracticeItem.sessions` 又用 `@Relationship(inverse: \PracticeSession.item)` 指回来。
+双向关系拆不开，单独提交任何一个都编译不过。
 
 **Files:**
 - Create: `Sources/Models/PracticeSession.swift`
-- Test: 本任务只需编译通过，行为测试在 Task 7 建好容器后一并进行
+- Create: `Sources/Models/PracticeItem.swift`
+- Test: 本任务只需编译通过，行为测试在 Task 6 建好容器后一并进行
 
-- [ ] **Step 1: 实现**
+- [ ] **Step 1: 实现 PracticeSession**
 
 `Sources/Models/PracticeSession.swift`：
 
@@ -706,27 +713,7 @@ final class PracticeSession {
 > 若用 `Date()`，默认值会在 Schema 构建时定格成某个看起来很合理的时刻，
 > 真出了「没赋值」的 bug 反而看不出来。
 
-- [ ] **Step 2: 确认编译通过**
-
-Run: `cd /Users/bill/Documents/GitHub/wisewalk && make build`
-Expected: 无 error，命令退出码 0
-
-- [ ] **Step 3: 提交**
-
-```bash
-cd /Users/bill/Documents/GitHub/wisewalk
-git add Sources/Models/PracticeSession.swift
-git commit -m "feat: PracticeSession append-only 流水实体"
-```
-
----
-
-### Task 5: PracticeItem —— 定课项
-
-**Files:**
-- Create: `Sources/Models/PracticeItem.swift`
-
-- [ ] **Step 1: 实现**
+- [ ] **Step 2: 实现 PracticeItem**
 
 `Sources/Models/PracticeItem.swift`：
 
@@ -825,22 +812,22 @@ final class PracticeItem {
 }
 ```
 
-- [ ] **Step 2: 确认编译通过**
+- [ ] **Step 3: 确认编译通过**
 
 Run: `cd /Users/bill/Documents/GitHub/wisewalk && make build`
 Expected: 无 error，命令退出码 0
 
-- [ ] **Step 3: 提交**
+- [ ] **Step 4: 提交**
 
 ```bash
 cd /Users/bill/Documents/GitHub/wisewalk
-git add Sources/Models/PracticeItem.swift
-git commit -m "feat: PracticeItem 定课项实体"
+git add Sources/Models/PracticeSession.swift Sources/Models/PracticeItem.swift
+git commit -m "feat: PracticeSession 与 PracticeItem 实体"
 ```
 
 ---
 
-### Task 6: DaySnapshot —— 当日应做清单快照
+### Task 5: DaySnapshot —— 当日应做清单快照
 
 **Files:**
 - Create: `Sources/Models/DaySnapshot.swift`
@@ -906,7 +893,7 @@ git commit -m "feat: DaySnapshot 当日清单快照实体"
 
 ---
 
-### Task 7: 容器装配与 CloudKit 约束守卫
+### Task 6: 容器装配与 CloudKit 约束守卫
 
 design-spec §4.6 列了四条 CloudKit 硬约束。写进文档里靠人眼盯是守不住的——半年后加个字段谁还记得。这个任务把四条约束变成会失败的测试。
 
@@ -1100,8 +1087,17 @@ import Foundation
 }
 ```
 
-- [ ] **Step 3: 跑测试确认失败**
+> **这四条守卫已实测确认能咬人**，不是摆设。分别往模型里塞过
+> `@Attribute(.unique)`、无默认值的非可选属性、名为 `todayTotal` 的字段，
+> 三条守卫都如期变红并指名道姓。
+>
+> 唯一需要说明的是反向关系那条：**把 `inverse:` 从 `@Relationship` 里删掉，测试照样通过**——
+> 因为 SwiftData 会在候选唯一时自动推断反向关系，CloudKit 也就满意了，这不算违规。
+> 它真正拦的是压根无从推断的情形（比如 `DaySnapshot` 单向指向 `PracticeItem`
+> 而对方没有任何回指），实测此时 `inverseName` 为 nil，守卫立刻变红。
+> 后来人若发现删 `inverse:` 不报错，别急着断言守卫失灵。
 
+- [ ] **Step 3: 跑测试确认失败**
 Run: `cd /Users/bill/Documents/GitHub/wisewalk && make test`
 Expected: 编译失败，报 `cannot find 'ModelContainerFactory' in scope`
 
@@ -1190,7 +1186,7 @@ git commit -m "feat: 容器装配与 CloudKit 约束守卫测试"
 
 ---
 
-### Task 8: LedgerMath —— 求和与圆满判定
+### Task 7: LedgerMath —— 求和与圆满判定
 
 **Files:**
 - Create: `Sources/Core/LedgerMath.swift`
@@ -1315,7 +1311,7 @@ git commit -m "feat: LedgerMath 账本求和与圆满判定"
 
 ---
 
-### Task 9: DeviceIdentity —— 流水的落款
+### Task 8: DeviceIdentity —— 流水的落款
 
 诊断页要回答「这笔账是哪台设备记的」。iOS 16 起 `UIDevice.current.name` 不再返回用户起的名字（无特殊 entitlement 时只给通用名），所以用「机型 + 本机短码」拼一个稳定标识。
 
@@ -1353,9 +1349,9 @@ import Foundation
     #expect(code.allSatisfy { allowed.contains($0) })
 }
 
-@Test func 显示名包含机型与短码() {
+@Test func 显示名包含机型与短码() async {
     let defaults = UserDefaults(suiteName: "test.\(UUID().uuidString)")!
-    let name = DeviceIdentity.displayName(defaults: defaults)
+    let name = await DeviceIdentity.displayName(defaults: defaults)
     #expect(name.contains("·"))
     let parts = name.split(separator: "·")
     #expect(parts.count == 2)
@@ -1396,6 +1392,10 @@ enum DeviceIdentity {
     }
 
     /// 形如 `iPhone·A3K9`
+    ///
+    /// `UIDevice` 在 SDK 里标了 `NS_SWIFT_UI_ACTOR`，严格并发下取机型必须在主线程，
+    /// 所以这里如实标 `@MainActor` 而不是绕开。调用方 `DayLedger` 本就是 `@MainActor`。
+    @MainActor
     static func displayName(defaults: UserDefaults = .standard) -> String {
         "\(UIDevice.current.model)·\(shortCode(defaults: defaults))"
     }
@@ -1417,7 +1417,7 @@ git commit -m "feat: DeviceIdentity 设备落款"
 
 ---
 
-### Task 10: DayLedger —— 唯一写入口
+### Task 9: DayLedger —— 唯一写入口
 
 「只增不改不删」这条纪律，如果散落在各个界面里就守不住。所有写操作收口到这一个类型。
 
@@ -1754,7 +1754,7 @@ final class DayLedger {
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd /Users/bill/Documents/GitHub/wisewalk && make test`
-Expected: 13 个 DayLedger 测试全部 `passed`，特别确认 `撤销是追加负数而非删除` 与 `同一编号重复入账只记一笔`
+Expected: 12 个 DayLedger 测试全部 `passed`（累计 54），特别确认 `撤销是追加负数而非删除` 与 `同一编号重复入账只记一笔`
 
 - [ ] **Step 5: 提交**
 
@@ -1766,7 +1766,7 @@ git commit -m "feat: DayLedger 账本唯一写入口"
 
 ---
 
-### Task 11: 快照与圆满判定
+### Task 10: 快照与圆满判定
 
 **Files:**
 - Modify: `Sources/Store/DayLedger.swift`（在 `// MARK: - 读` 之后追加新的 `// MARK: - 快照与圆满` 区段）
