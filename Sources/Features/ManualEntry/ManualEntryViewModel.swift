@@ -87,7 +87,14 @@ final class ManualEntryViewModel {
         timeZone: TimeZone
     ) throws -> PracticeSession {
         guard let item = selectedItem else { throw ManualEntryError.noItemSelected }
-        guard amount > 0 else { throw ManualEntryError.nonPositiveAmount }
+        guard self.amount > 0 else { throw ManualEntryError.nonPositiveAmount }
+        // **把校验过的数抄成局部量再往下走。**
+        // 从前底下那句 `record` 直接读 `self.amount`，于是「校验的是哪个数」
+        // 与「记进账本的是哪个数」中间隔着两次会抛的 I/O，全靠「这中间没人改它」
+        // 这个默契撑着——而这份默契在代码里一个字都没写。
+        // Step 9 变异 3 一挪清空的位置，`record` 当场收到 0：证据就在那儿。
+        // 这是个只增不减的账本，往里写的那个数不该是可变状态的即时读数。
+        let amount = self.amount
         let today = DayKey.today(dayStartHour: dayStartHour, now: now, timeZone: timeZone)
         guard !DayKey.isFuture(selectedDayKey, comparedTo: today) else {
             throw ManualEntryError.futureDay
@@ -102,6 +109,12 @@ final class ManualEntryViewModel {
         // 就会拿**此刻本机看得见的**定课集合给那一天永久定格快照——
         // 而「已存在则沿用、绝不覆盖」意味着**再也改不回来**。
         // 第 3 卷开真实同步之前必须先答 §5.6 的三个问题，答完回来看这里。
+        //
+        // ⚠️ 还有一层：这一句**自己会 save**。它成功之后 `record` 若抛错（磁盘满等），
+        // 库里就留下一个「有快照、一笔流水都没有」的历史日——第 5 卷月历翻到那天
+        // 会说「这几门功课你一门都没做」，而用户那天可能压根还没建这些功课。
+        // **编一个失败比说「无课」更糟。** 用户重新补记一次会自愈（快照沿用、流水补上）。
+        // 没在这一卷动它，是因为把两次 save 合成一次要改第一卷已封存的 `DayLedger`。
         _ = try ledger.plan(for: selectedDayKey, activeItems: try items.activeItems())
 
         let session = try ledger.record(
@@ -132,9 +145,18 @@ final class ManualEntryViewModel {
     /// 修正：追加一笔等额负数，**原记录纹丝不动**。
     /// `DayLedger.revoke` 以 `note` 里的 `revoke:<原记录 id>` 为幂等键，
     /// 用户手快点两下、或两台设备各撤一次，都只会扣一次。
-    func revoke(_ session: PracticeSession, at now: Date = Date(),
-                timeZone: TimeZone = .current) throws {
-        try ledger.revoke(session, at: now, timeZone: timeZone)
+    ///
+    /// **不收时区**：撤销落在哪天与时区毫无关系，那笔负数的 `dayKey` 与
+    /// `tzOffsetMinutes` 一律照抄**原流水**的。今天撤销七月一日的一笔，
+    /// 负数就落在七月一日。从前这里收一个 `timeZone` 再原样传下去，
+    /// 而 `DayLedger.revoke` 根本不看它——一个只会让人误以为「时区影响落日」的死参数。
+    ///
+    /// ⚠️ 谁要是把落日改成按「现在」推，七月一日会照旧记着 5000、今天凭空多出 −5000，
+    /// 两天同时说谎；而 `total` 的 clamp 还会把今天那笔掩盖成「归零」，
+    /// 用户今天真做过的功课就此凭空消失。`撤销历史流水负数落在功课那天而不是今天`
+    /// 这条测试守的就是这个。
+    func revoke(_ session: PracticeSession, at now: Date = Date()) throws {
+        try ledger.revoke(session, at: now)
     }
 
     /// 某天某项的全部流水，**最近写的排在最前**——用户要改的多半是刚记错的那笔。
