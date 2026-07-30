@@ -43,14 +43,40 @@ private func 干净的偏好() -> UserDefaults {
     // 界面第 5 卷才开放，但这条测试现在就得立着。
     let d = 干净的偏好()
     let 头一回 = AppSettings(defaults: d)
+    // **两个开关必须给不同的值。** 从前这里把 sound 和 haptic 都写成 false，
+    // 于是一个「haptic 读的是 sound 那个键」的实现照样绿——两个都 false，
+    // 读串了也看不出来。那个 bug 的方向是「多」：用户关掉音效，震动跟着一起没了，
+    // 他敲了一下什么反馈都没有，以为没记上，于是又敲一下。
     头一回.soundEnabled = false
-    头一回.hapticEnabled = false
+    头一回.hapticEnabled = true
     头一回.dayStartHour = 4
 
     let 重启后 = AppSettings(defaults: d)
     #expect(!重启后.soundEnabled, "重启后音效设置丢了")
-    #expect(!重启后.hapticEnabled, "重启后震动设置丢了")
+    #expect(重启后.hapticEnabled, "重启后震动设置丢了，或者它读的是音效那个键")
     #expect(重启后.dayStartHour == 4, "重启后一日起始丢了，晚课会记到第二天")
+}
+
+@MainActor
+@Test func 盘上已存的越界一日起始要在装配时夹回来() {
+    // setter 会 clamp，但**盘上的值不经过 setter**。
+    // 越界值进得来的路子有两条：旧版本写下的，以及第 3 卷接上
+    // `NSUbiquitousKeyValueStore` 之后别的设备推过来的。
+    //
+    // 真让 9 点生效，用户上午做的功课会被记到**前一天**——
+    // 昨天凭空多一笔，今天少一笔，两个方向一起错。
+    //
+    // 从前这条路没有守卫：`一日起始默认零点且只收0到6` 只走干净域（读到 0）
+    // 和 setter 两条路，一个「init 不 clamp」的实现从这两条路都照不出来。
+    let name = "test.\(UUID().uuidString)"
+    let d = UserDefaults(suiteName: name)!
+    d.removePersistentDomain(forName: name)
+    d.set(9, forKey: "settings.dayStartHour")
+
+    #expect(AppSettings(defaults: d).dayStartHour == 6, "盘上的越界值没夹到上限")
+
+    d.set(-3, forKey: "settings.dayStartHour")
+    #expect(AppSettings(defaults: d).dayStartHour == 0, "盘上的越界值没夹到下限")
 }
 
 @MainActor

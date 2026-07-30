@@ -44,11 +44,17 @@ struct FulfillmentLabel: View {
                 .foregroundStyle(state == .fulfilled ? theme.fulfilled : theme.tertiaryText)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 2)
-                .background(
-                    Capsule().fill(
-                        (state == .fulfilled ? theme.fulfilled : theme.tertiaryText).opacity(0.12)
-                    )
-                )
+            // 这里从前有一层同色 12% 的 Capsule 底。看着秀气，代价是
+            // **文字站的底不再是审计时那个底**：`所有承载文字的色值都不低于AA标准`
+            // 量的是色值对纯背景，而屏幕上真实合成出来的是——
+            //   圆满 `#5C7652` on `#E7E8DD` = 4.075:1
+            //   今日无课 `#6F6759` on `#E9E6DE` = 4.478:1
+            // 双双跌破 4.5。
+            //
+            // §7.2 那句「不使用 opacity 派生层级」立案时写得很清楚：
+            // 早期版本正是这么产生了 6 级低于 3:1 的文字，最糟的 Tab 标签只有 2.04:1。
+            // 底板一去，两个色回到纯背景上（4.709 / 5.220），双双过线，
+            // 也正合 §7.1「减法：去卡片描边、去图标底板」。
         }
     }
 }

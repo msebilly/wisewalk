@@ -20,13 +20,27 @@ import SwiftUI
     }
 }
 
-@Test func 模板色板里每个色值都解析得动() {
+@Test func 模板色板每支在两个背景上都够得着图形对比度() {
     // 只验这六个用户选得到的色。**内置模板本身没有颜色**——
     // `PracticeItemStore.create(from:)` 一律写死 `Palette.Light.fulfilled`，
     // 模板带不带色都到不了用户眼前。给 `PracticeTemplate` 加个返回同一常量的
     // `colorHex` 只会让这里变成「把一个常量断言八遍」。
+    //
+    // 从前这里只问「解析得动吗」。`#D9B679` 当然解析得动，于是它带着浅色底上
+    // **1.798:1** 大摇大摆走了进来——**解析得动和看得见是两回事**。
+    //
+    // 两个底都得问：`ProgressRing` 收的是一个固定 hex，不随 colorScheme 走。
+    // 一支色只在浅色下合格，深色模式的用户就看不见自己的环，
+    // 而深色模式正是夜课那批人在用的。
     for hex in TemplateCatalog.colorChoices {
-        #expect(Contrast.channels(hex) != nil, "模板色 \(hex) 解析不了")
+        guard let 浅 = Contrast.ratio(hex, Palette.Light.background),
+              let 深 = Contrast.ratio(hex, Palette.Dark.background) else {
+            Issue.record("模板色 \(hex) 解析不了")
+            continue
+        }
+        // WCAG 1.4.11：非文字内容 3:1。环和图标都只有几个 px 宽。
+        #expect(浅 >= 3, "模板色 \(hex) 在浅色底上只有 \(String(format: "%.3f", 浅)):1")
+        #expect(深 >= 3, "模板色 \(hex) 在深色底上只有 \(String(format: "%.3f", 深)):1")
     }
 }
 

@@ -12,7 +12,8 @@ struct ProgressRing: View {
     let isFulfilled: Bool
     let iconName: String
     var diameter: CGFloat = 44
-    var lineWidth: CGFloat = 4
+    /// design-spec §7.1 定的是 2.5–3px。粗环在小直径上会把中间那枚图标挤没。
+    var lineWidth: CGFloat = 3
 
     /// 目标为 0 时 Double 除法会给出 inf/nan，直接喂给 `trim` 会画出乱七八糟的弧。
     static func clamp(_ v: Double) -> Double {
