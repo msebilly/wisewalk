@@ -15,6 +15,7 @@ struct PracticeTemplate: Identifiable, Equatable, Sendable {
     let iconName: String
 
     var id: String { key }
+    var colorHex: String { Palette.Light.fulfilled }
 }
 
 /// design-spec §6.6 的内置模板清单。
@@ -49,6 +50,25 @@ enum TemplateCatalog {
 
     /// 批量增加的默认步长。§6.6：拨完一串念珠一次加 108，或从实体计数器誊抄。
     static let defaultBatchStep = 108
+
+    /// 计时类的目标快捷档，单位是**分钟**。同样以「不设目标」为首、为默认。
+    /// 三个数字取自常见的一炷香、半小时、一小时，不是替用户定量。
+    static let durationGoalChips: [Int?] = [nil, 15, 30, 60]
+
+    /// 图标候选。全部为系统内置 SF Symbol，已逐个核对存在——
+    /// 名字写错不会报错，只会渲染成空白。
+    static let iconChoices = [
+        "circle.grid.3x3", "waveform", "book", "figure.stand",
+        "figure.mind.and.body", "pencil.and.outline", "flame", "leaf",
+        "hands.sparkles", "sun.horizon", "moon.stars", "heart"
+    ]
+
+    /// 颜色候选。取自 §7 色板中**可作图形色**的几支，
+    /// 承载文字的层级由 `Palette.textOnBackground` 的对比度审计单独把关。
+    static let colorChoices = [
+        Palette.Light.fulfilled, Palette.Light.accent, Palette.Light.glow,
+        "#4A6D8C", "#7A5C8E", "#8C5A5A"
+    ]
 
     static func template(key: String) -> PracticeTemplate? {
         all.first { $0.key == key }
