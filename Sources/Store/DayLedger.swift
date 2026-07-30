@@ -194,6 +194,17 @@ final class DayLedger {
         LedgerMath.rawTotal(try sessions(on: dayKey, itemID: itemID))
     }
 
+    /// 当日「做了几回」。计时类就是坐数。
+    ///
+    /// 撤销与修正走 `.adjustment`，它们是对既有一坐的更正，不是新的一坐；
+    /// 负数流水更不该算。少数掉一坐比多数一坐好：多数出来的那一坐用户
+    /// 对不上账，只会以为自己记错了。
+    func roundCount(on dayKey: Int, itemID: UUID) throws -> Int {
+        try sessions(on: dayKey, itemID: itemID)
+            .filter { $0.amount > 0 && $0.source != .adjustment }
+            .count
+    }
+
     /// 该编号是否已入账。崩溃恢复前必查。
     func exists(sessionID: UUID) throws -> Bool {
         try fetch(sessionID: sessionID) != nil

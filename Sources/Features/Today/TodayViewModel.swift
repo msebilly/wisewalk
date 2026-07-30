@@ -16,6 +16,8 @@ struct TodayRow: Identifiable, Equatable, Sendable {
     let goal: Int?
     /// 当日显示总量（负数已 clamp）。计时类为秒。
     let total: Int
+    /// 当日「做了几回」。计时类是坐数：正数、非 `.adjustment` 的流水条数，撤销与修正不算。
+    let roundCount: Int
     let state: FulfillmentState
     /// 当日快照登记过它，但用户之后把它归档了。只会在归档当天出现。
     let isArchived: Bool
@@ -127,6 +129,7 @@ final class TodayViewModel {
                 measureType: item.measureType,
                 goal: plan.goals[id.uuidString],
                 total: try ledger.total(on: key, itemID: id),
+                roundCount: try ledger.roundCount(on: key, itemID: id),
                 state: try ledger.fulfillment(of: id, plan: plan),
                 isArchived: item.isArchived
             ))
@@ -153,5 +156,42 @@ final class TodayViewModel {
         dayKey = key
         rows = sorted
         unresolvedItemIDs = unresolved
+    }
+
+    /// 勾选类的打勾／取消。
+    ///
+    /// 取消**不删记录**——追加一笔等额负数（走 `DayLedger.revoke`，它以
+    /// `revoke:<原记录 id>` 为幂等键）。append-only 是这个 App 的地基：
+    /// 真删记录会让同步冲突时无从对账，而对账不了就等于丢功课。
+    ///
+    /// 只对勾选类且未归档的项生效。念佛点一下记 1 声是计数器的事，
+    /// 别让今日页也能记数；归档当天该项仍显示（口径统一）但不该还能往里记。
+    func toggleCheckbox(
+        itemID: UUID,
+        at now: Date = Date(),
+        dayStartHour: Int = 0,
+        timeZone: TimeZone = .current
+    ) throws {
+        guard let row = rows.first(where: { $0.itemID == itemID }),
+              row.measureType == .check,
+              !row.isArchived,
+              let item = try items.item(id: itemID) else { return }
+
+        if row.total > 0 {
+            let positives = try ledger.sessions(on: dayKey, itemID: itemID)
+                .filter { $0.amount > 0 }
+                .sorted { ($0.createdAt, $0.id.uuidString) > ($1.createdAt, $1.id.uuidString) }
+            for s in positives {
+                try ledger.revoke(s, at: now, timeZone: timeZone)
+            }
+        } else {
+            try ledger.record(
+                item: item, amount: 1, source: .manual,
+                startedAt: now, endedAt: now, at: now,
+                dayStartHour: dayStartHour, timeZone: timeZone,
+                onDay: dayKey
+            )
+        }
+        try reload(now: now, dayStartHour: dayStartHour, timeZone: timeZone)
     }
 }
