@@ -15,7 +15,6 @@ struct PracticeTemplate: Identifiable, Equatable, Sendable {
     let iconName: String
 
     var id: String { key }
-    var colorHex: String { Palette.Light.fulfilled }
 }
 
 /// design-spec §6.6 的内置模板清单。

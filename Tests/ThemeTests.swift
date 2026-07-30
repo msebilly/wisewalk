@@ -21,11 +21,12 @@ import SwiftUI
 }
 
 @Test func 模板色板里每个色值都解析得动() {
+    // 只验这六个用户选得到的色。**内置模板本身没有颜色**——
+    // `PracticeItemStore.create(from:)` 一律写死 `Palette.Light.fulfilled`，
+    // 模板带不带色都到不了用户眼前。给 `PracticeTemplate` 加个返回同一常量的
+    // `colorHex` 只会让这里变成「把一个常量断言八遍」。
     for hex in TemplateCatalog.colorChoices {
         #expect(Contrast.channels(hex) != nil, "模板色 \(hex) 解析不了")
-    }
-    for t in TemplateCatalog.all {
-        #expect(Contrast.channels(t.colorHex) != nil, "模板「\(t.name)」的色值解析不了")
     }
 }
 
