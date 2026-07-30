@@ -307,3 +307,68 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int, _ s: Int = 0) -> D
     #expect(!vm.isRunning)
     #expect(try drafts.pendingDrafts().isEmpty)
 }
+
+@MainActor
+@Test func 坐了八小时多半是忘了按结束不自动记账() throws {
+    // 早课六点起坐，忘了按结束，晚上才想起来打开 App。
+    // App 若被系统回收过，下次启动的恢复弹窗会按心跳止步处问「记 20 秒吗」；
+    // App 只是挂起的话，回前台 start() 照单全收那份草稿，refresh 直接给出
+    // 十几个小时——同一组事实，分叉点只是 iOS 有没有恰好回收这个进程。
+    // 账本这边一秒都不许动：不落账、不清草稿、抛错让界面去问。
+    let (vm, drafts, _, item, ctx) = try makeTimer()
+    try vm.start(at: 北京(7, 28, 6, 0), timeZone: 北京时间)
+
+    #expect(throws: TimerViewModelError.implausibleDuration(seconds: 30600)) {
+        try vm.finish(at: 北京(7, 28, 14, 30))
+    }
+
+    #expect(try 库里一条流水都没有(ctx), "编一个数记上去，比什么都不记坏得多")
+    #expect(try drafts.draft(for: item.id) != nil, "草稿要原样留着——问的过程中 App 死了还能恢复")
+    #expect(vm.isRunning, "还没了结，别把页面状态清了")
+}
+
+@MainActor
+@Test func 四小时整还算数多一秒才拦() throws {
+    // 阈值本身必须落在「记」这一侧：禅七长坐坐满四个钟头是真事。
+    let 起 = 北京(7, 28, 6, 0)
+    let (刚好, _, ledger1, item1, _) = try makeTimer(goal: nil)
+    try 刚好.start(at: 起, timeZone: 北京时间)
+    try 刚好.finish(at: 起.addingTimeInterval(4 * 3600))
+    #expect(try ledger1.total(on: 20260728, itemID: item1.id) == 14400)
+
+    let (多一秒, _, _, _, ctx2) = try makeTimer(goal: nil)
+    try 多一秒.start(at: 起, timeZone: 北京时间)
+    #expect(throws: TimerViewModelError.implausibleDuration(seconds: 14401)) {
+        try 多一秒.finish(at: 起.addingTimeInterval(4 * 3600 + 1))
+    }
+    #expect(try 库里一条流水都没有(ctx2))
+}
+
+@MainActor
+@Test func 问出实际时长之后按用户给的那个数记账() throws {
+    let (vm, drafts, ledger, item, _) = try makeTimer()
+    try vm.start(at: 北京(7, 28, 6, 0), timeZone: 北京时间)
+    #expect(throws: TimerViewModelError.self) { try vm.finish(at: 北京(7, 28, 14, 30)) }
+
+    let s = try vm.record(seconds: 1800, at: 北京(7, 28, 14, 30))
+
+    #expect(s?.amount == 1800, "记的是用户说的数，不是计时器上那个")
+    #expect(try ledger.total(on: 20260728, itemID: item.id) == 1800)
+    #expect(vm.dayTotal == 1800)
+    #expect(try drafts.pendingDrafts().isEmpty)
+    #expect(!vm.isRunning)
+}
+
+@MainActor
+@Test func 超限之后放弃这一坐则草稿与账本都不留痕() throws {
+    let (vm, drafts, _, _, ctx) = try makeTimer()
+    try vm.start(at: 北京(7, 28, 6, 0), timeZone: 北京时间)
+    #expect(throws: TimerViewModelError.self) { try vm.finish(at: 北京(7, 28, 14, 30)) }
+
+    #expect(try vm.record(seconds: 0, at: 北京(7, 28, 14, 30)) == nil)
+
+    #expect(try 库里一条流水都没有(ctx))
+    #expect(try drafts.pendingDrafts().isEmpty)
+    #expect(!vm.isRunning)
+    #expect(vm.elapsed == 0)
+}

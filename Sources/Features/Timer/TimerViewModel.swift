@@ -1,6 +1,18 @@
 import Foundation
 import Observation
 
+enum TimerViewModelError: Error, LocalizedError, Equatable {
+    /// 这一坐长得不像真的，多半是忘了按结束。带上计时器读数供界面显示。
+    case implausibleDuration(seconds: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .implausibleDuration(let seconds):
+            return "计时器上已经走到 \(DurationFormat.spoken(seconds)) 了，多半是忘了按结束。这一坐实际坐了多久？"
+        }
+    }
+}
+
 /// 计时器的状态机。
 ///
 /// **时长一律是 `now − startedAt`**（§6.3）——绝不累加 Timer 的滴答数。
@@ -27,6 +39,31 @@ final class TimerViewModel {
     ///
     /// 10 秒这个值本身管的是另一件事：**前台**打坐时被回收能损失多少。
     static let heartbeatInterval: TimeInterval = 10
+
+    /// 单次时长超过它就**不自动落账**。
+    ///
+    /// App 分不清这两件事——它们在代码里长得一模一样，都是 `now − startedAt` 一个大数：
+    /// - 用户起坐、锁屏、把手机放在一边坐了半小时（§6.3 的立身功能，**必须记**）
+    /// - 用户早课起坐，忘了按结束，晚上才想起来打开 App（**绝不能记**）
+    ///
+    /// 而这条路平时藏得很深：App 若被系统回收，下次启动 `RecoveryCoordinator`
+    /// 会按心跳止步处推算，弹窗问「记 20 秒吗」；App 若只是**挂起**，回前台
+    /// `start()` 照单全收那份旧草稿，`refresh` 直接给出 72 小时并悄悄记进账本。
+    /// 同一份草稿、同一组事实，分叉点只是 iOS 有没有恰好回收这个进程——
+    /// 用户对此零可见度。`RecoveryCoordinator` 那张网只在**启动时**张开，
+    /// 挂起-恢复压根不经过启动。
+    ///
+    /// 唯一的判据只有量级。4 小时：一炷香 1–1.5 小时，禅七长坐也很少过 4 小时。
+    ///
+    /// **超限时绝不写上限值。** 记 4 小时和记 8 小时是同一类罪，都是编数。
+    /// 只能不落账、把草稿**原样留着**、抛错让界面去问用户实际坐了多久
+    /// （`record(seconds:at:)`）。草稿留着还有一层保险：问的过程中 App 死了，
+    /// 下次启动照样恢复得回来。
+    ///
+    /// 只在 `finish()` 拦，不在 `start()` 拦。`start()` 若拒绝承接旧草稿，
+    /// 计时页就成了死页；让它照常显示 `72:00:00` 反而是最诚实的提示——
+    /// 用户一眼就知道出事了，而账本此刻一秒都还没动。
+    static let implausibleAfter: TimeInterval = 4 * 3600
 
     private(set) var elapsed: Int = 0
     private(set) var isRunning = false
@@ -151,21 +188,44 @@ final class TimerViewModel {
         refresh(at: now)
 
         guard elapsed > 0 else {
-            try drafts.discard(draft)
-            self.draft = nil
-            isRunning = false
-            startedAt = nil
-            elapsed = 0
+            try discardAndClear(draft)
             return nil
         }
 
-        let seconds = elapsed
+        guard TimeInterval(elapsed) <= Self.implausibleAfter else {
+            // 一个字段都不动、草稿原样留着。用户接下来可能填一个数走
+            // `record(seconds:)`，也可能直接 `abandon()`；就算 App 这时候死了，
+            // 草稿还在盘上，下次启动 `RecoveryCoordinator` 照样问得出来。
+            throw TimerViewModelError.implausibleDuration(seconds: elapsed)
+        }
+
+        return try commitAndClear(draft, seconds: elapsed, at: now)
+    }
+
+    /// 界面问出实际时长之后走这里落账——`finish()` 抛 `.implausibleDuration` 的续篇。
+    /// 传 0 或负数等于放弃这一坐（草稿与账本都不留痕）。
+    @discardableResult
+    func record(seconds: Int, at now: Date = Date()) throws -> PracticeSession? {
+        guard let draft else { return nil }
+        guard seconds > 0 else {
+            try discardAndClear(draft)
+            return nil
+        }
+        return try commitAndClear(draft, seconds: seconds, at: now)
+    }
+
+    private func discardAndClear(_ draft: SessionDraft) throws {
+        try drafts.discard(draft)
+        clearRound()
+    }
+
+    @discardableResult
+    private func commitAndClear(_ draft: SessionDraft, seconds: Int, at now: Date) throws -> PracticeSession {
         let session = try drafts.commit(
             draft, item: item, amount: seconds,
             at: now, dayStartHour: dayStartHour, timeZone: timeZone
         )
-        self.draft = nil
-        isRunning = false
+        clearRound()
         if session.dayKey != committedDayKey {
             // 坐过了零点：这一坐落在新的一天，旧那天的 `committedTotal` 跟它没关系，
             // 累加上去屏幕就会替用户多报一整天（3600 + 1800 = 5400，而「今日」只有 1800）。
@@ -180,9 +240,15 @@ final class TimerViewModel {
         // 已经入账，从「本次」挪到「今日已记」。
         // 不挪的话，同一页再坐第二轮时 dayTotal 会把第一轮漏掉。
         committedTotal += seconds
+        return session
+    }
+
+    /// 清掉「本轮」的全部痕迹。**只许在会抛的那步成功之后调。**
+    private func clearRound() {
+        draft = nil
+        isRunning = false
         startedAt = nil
         elapsed = 0
-        return session
     }
 
     /// 放弃本次：草稿与账本都不留痕。
@@ -191,10 +257,6 @@ final class TimerViewModel {
     /// 下次启动照样弹恢复窗，问用户要不要记上他明明放弃了的那一坐。
     func abandon() throws {
         guard let draft else { return }
-        try drafts.discard(draft)
-        self.draft = nil
-        isRunning = false
-        startedAt = nil
-        elapsed = 0
+        try discardAndClear(draft)
     }
 }
