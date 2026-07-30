@@ -74,9 +74,10 @@ import SwiftData
         "PracticeItem": [
             "id", "name", "iconName", "colorHex", "measureTypeRaw", "unit", "dailyGoal",
             "scheduleRuleRaw", "reminderTimes", "sortOrder", "isArchived", "templateKey",
-            "createdAt", "updatedAt"
+            "createdAt", "updatedAt", "activatedAt"
         ]
     ]
+
     for entity in ModelContainerFactory.syncedSchema.entities {
         guard let whitelist = allowed[entity.name] else {
             Issue.record("\(entity.name) 未登记白名单，新实体的每个建模属性都需先确认再登记")

@@ -42,6 +42,17 @@ final class PracticeItem {
     var createdAt: Date = Date.distantPast
     var updatedAt: Date = Date.distantPast
 
+    /// 这门课**最近一次成为活跃状态**的时刻：立课时等于 `createdAt`，
+    /// 此后每次从归档里恢复都会更新。
+    ///
+    /// 有了它才答得出 `DayLedger.appendLateArrivals` 真正要问的那句话——
+    /// **「那天开始的时候，这门课活没活着」**。
+    /// `createdAt` 答不了：一门课立于上月、上周归档、今天下午恢复，
+    /// 按 `createdAt` 判就会被追加进今天，把用户已经挣到的圆满收回去。
+    /// 而同一条路径上还有个**必须继续放行**的场景：昨晚在 iPad 上恢复、今天才同步到本机——
+    /// 那时它确实是今天该做的。两者只差在恢复发生在哪一天，正是本字段记的东西。
+    var activatedAt: Date = Date.distantPast
+
     /// CloudKit 要求：关系必须可选，且必须有反向关系。
     /// `.nullify` 保证即便定课项被清理，流水也只是失去归属而不会被连带删除。
     @Relationship(deleteRule: .nullify, inverse: \PracticeSession.item)
@@ -61,7 +72,8 @@ final class PracticeItem {
         isArchived: Bool = false,
         templateKey: String? = nil,
         createdAt: Date = Date(),
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        activatedAt: Date? = nil
     ) {
         self.id = id
         self.name = name
@@ -77,6 +89,10 @@ final class PracticeItem {
         self.templateKey = templateKey
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        // 传 nil 表示「跟 `createdAt` 一致」——立课那一刻它就是活跃的。
+        // 不写成字面量默认 `Date()`：调用方指定了 `createdAt` 却没提 `activatedAt` 时
+        // 两者会莫名差出一截，而所有构造历史场景的测试都是这么写的。
+        self.activatedAt = activatedAt ?? createdAt
         self.sessions = []
     }
 

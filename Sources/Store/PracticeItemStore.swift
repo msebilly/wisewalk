@@ -178,8 +178,12 @@ final class PracticeItemStore {
         try context.save()
     }
 
+    /// 恢复归档。**`activatedAt` 必须跟着更新**——它记的是「最近一次成为活跃状态」，
+    /// `DayLedger.appendLateArrivals` 判「那天开始时它活没活着」全靠它。
+    /// 漏了这一行，今天下午恢复的课会被追加进今天，把已挣到的圆满收回去。
     func unarchive(_ item: PracticeItem, at now: Date = Date()) throws {
         item.isArchived = false
+        item.activatedAt = now
         item.updatedAt = now
         try context.save()
     }

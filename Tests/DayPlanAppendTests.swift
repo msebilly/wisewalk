@@ -140,3 +140,36 @@ private func 课(_ name: String, 立于 born: Date, 目标 goal: Int? = nil, 归
     let 愈 = try ledger.plan(for: 20260728, activeItems: 全, dayStartHour: 0, timeZone: 北京)
     #expect(愈.requiredItemIDs.count == 3)
 }
+
+@Test @MainActor func 今天恢复的归档定课不会被追加进今天() throws {
+    let (ledger, ctx) = try 建()
+    let 念佛 = 课("念佛", 立于: 时刻(7, 20, 9))
+    let 打坐 = 课("打坐", 立于: 时刻(7, 1, 9), 归档: true)
+    ctx.insert(念佛); ctx.insert(打坐)
+
+    // 早上定格时打坐还归着，不在快照里。
+    _ = try ledger.plan(for: 20260728, activeItems: [念佛], dayStartHour: 0, timeZone: 北京)
+
+    // 下午才恢复——跟今天新立的课同待遇，从明天算起。
+    // 追加进今天就等于把他今天已经挣到的圆满收回去。
+    try PracticeItemStore(context: ctx).unarchive(打坐, at: 时刻(7, 28, 15))
+
+    let 后 = try ledger.plan(for: 20260728, activeItems: [念佛, 打坐], dayStartHour: 0, timeZone: 北京)
+    #expect(后.requiredItemIDs == [念佛.id])
+}
+
+@Test @MainActor func 昨天恢复的归档定课同步进来后仍要被追加() throws {
+    let (ledger, ctx) = try 建()
+    let 念佛 = 课("念佛", 立于: 时刻(7, 20, 9))
+    let 打坐 = 课("打坐", 立于: 时刻(7, 1, 9), 归档: true)
+    ctx.insert(念佛); ctx.insert(打坐)
+
+    _ = try ledger.plan(for: 20260728, activeItems: [念佛], dayStartHour: 0, timeZone: 北京)
+
+    // 昨晚就在 iPad 上恢复了，今天本机才同步到——那时它确实是今天该做的。
+    // 这一条与上一条只差在「恢复发生在哪一天」，正是 activatedAt 记的东西。
+    try PracticeItemStore(context: ctx).unarchive(打坐, at: 时刻(7, 27, 21))
+
+    let 后 = try ledger.plan(for: 20260728, activeItems: [念佛, 打坐], dayStartHour: 0, timeZone: 北京)
+    #expect(Set(后.requiredItemIDs) == Set([念佛.id, 打坐.id]))
+}

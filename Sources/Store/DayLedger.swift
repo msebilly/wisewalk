@@ -287,17 +287,21 @@ final class DayLedger {
     /// `TodayViewModel.isRestDay` 的文档写明它**不计入分母，也不中断**，
     /// 等于替用户抹掉一天欠账；而且推给了所有设备，「已存在则沿用」意味着再也改不回来。
     ///
-    /// **判据是「这门课是不是那天开始之前就立的」，不是「本机是不是刚看见它」。**
+    /// **判据是「那天开始的时候这门课活没活着」，不是「本机是不是刚看见它」。**
     /// 后者分不清「同步迟到」与「用户今天刚立」，而今天新立的课按现行规矩从明天算起——
-    /// 无差别并进来就成了「立一门课当场欠一天账」，方向同样是「多」。
-    /// `PracticeItem.createdAt` 记的是立课那一刻，与它何时同步到本机无关，正是要问的那句话。
+    /// 无差别并进来就成了「立一门课当场欠一天账」。
+    /// 用的是 `PracticeItem.activatedAt` 而不是 `createdAt`：一门课立于上月、上周归档、
+    /// 今天下午恢复，按 `createdAt` 判就会被追加进今天，**把用户已挣到的圆满收回去**。
+    /// `activatedAt` 记的是最近一次成为活跃状态的时刻，与它何时同步到本机无关，
+    /// 正是要问的那句话。守卫见 `今天恢复的归档定课不会被追加进今天`
+    /// 与 `昨天恢复的归档定课同步进来后仍要被追加`——这两条只差在恢复发生在哪一天。
     ///
     /// **两个 dayKey 直接比，不把 dayKey 反解成 Date。**
     /// `DayKeyCalendar.calendarDate(of:)` 的注释讲过为什么不能取零点：
     /// 夏令时切换日的零点根本不存在，构造出来是 nil 或被日历悄悄挪到前一天。
     /// 把 `createdAt` 也换算成 dayKey 问的是同一件事，却全程不碰 Date 重建。
     ///
-    /// `createdAt` 若是 `.distantPast`（CloudKit 推来的记录缺该字段时的兜底值），
+    /// `activatedAt` 若是 `.distantPast`（CloudKit 推来的记录缺该字段时的兜底值），
     /// 算出来的 dayKey 远小于任何真实日期，于是**一律追加**。方向是保守那一侧：
     /// 进了分母顶多显示未圆满，漏掉才是替他免单。
     ///
@@ -324,8 +328,8 @@ final class DayLedger {
         let late = activeItems.filter { item in
             guard !item.isArchived, !known.contains(item.id) else { return false }
             let born = DayKey.make(
-                from: item.createdAt,
-                tzOffsetMinutes: DayKey.currentOffsetMinutes(at: item.createdAt, timeZone: timeZone),
+                from: item.activatedAt,
+                tzOffsetMinutes: DayKey.currentOffsetMinutes(at: item.activatedAt, timeZone: timeZone),
                 dayStartHour: dayStartHour
             )
             return born < dayKey
