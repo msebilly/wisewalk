@@ -152,7 +152,7 @@ private func 库里一条流水都没有(_ ctx: ModelContext) throws -> Bool {
     // 补记这条路一份草稿都没有，`record` 每次新生成 id，
     // 没有任何东西拦得住第二次提交。用户手快点两下就是 1000 声，
     // 而他补记的是 500。
-    let (vm, _, ledger, item, _) = try makeManual()
+    let (vm, _, ledger, item, ctx) = try makeManual()
     vm.selectedItem = item
     vm.selectedDayKey = 20260701
     vm.amount = 500
@@ -163,7 +163,9 @@ private func 库里一条流水都没有(_ ctx: ModelContext) throws -> Bool {
     }
 
     #expect(try ledger.total(on: 20260701, itemID: item.id) == 500, "补的是 500，不是 1000")
-    #expect(try ledger.sessions(on: 20260701, itemID: item.id).count == 1)
+    // 全库计数，不是「那天那一项只有一笔」——第二笔若因为任何缘故落到别的日子
+    // 或别的项上，按天按项查是照不出来的。
+    #expect(try ctx.fetch(FetchDescriptor<PracticeSession>()).count == 1, "全库只该有这一笔")
 }
 
 @MainActor
@@ -197,7 +199,9 @@ private func 库里一条流水都没有(_ ctx: ModelContext) throws -> Bool {
 
     try vm.revoke(误记, at: 北京(7, 28, 21, 0))
 
-    #expect(try ledger.total(on: 20260701, itemID: item.id) == 0, "该抵消的是 7 月 1 日")
+    // 用 rawTotal 而不是 total：`total` 把负数 clamp 成 0，
+    // 将来若扣成 −10000 它照样报 0，这条断言就成了摆设。
+    #expect(try ledger.rawTotal(on: 20260701, itemID: item.id) == 0, "该抵消的是 7 月 1 日")
     #expect(try ledger.rawTotal(on: 20260728, itemID: item.id) == 0, "7 月 28 日不该多出负数")
     #expect(try ledger.sessions(on: 20260728, itemID: item.id).isEmpty)
 }
@@ -213,13 +217,35 @@ private func 库里一条流水都没有(_ ctx: ModelContext) throws -> Bool {
 
     let all = try ledger.sessions(on: 20260728, itemID: item.id)
     #expect(all.count == 2, "原记录必须还在")
-    #expect(all.contains { $0.id == 误记.id })
-    #expect(try ledger.total(on: 20260728, itemID: item.id) == 0)
+
+    // 名字说的是「纹丝不动」，那就得**逐个字段**验，而不是数条数。
+    // 只查「还有一条 id 相同」的话，一个把 `误记.amount` 顺手改成 0 的实现照样全绿——
+    // 而 §4.1「只增不改不删」已经被踩穿了。
+    let 原记录 = try #require(all.first { $0.id == 误记.id })
+    #expect(原记录.amount == 5000, "原记录的数被人动了")
+    #expect(原记录.source == .counter, "原记录的来源被人动了")
+    #expect(原记录.dayKey == 20260728, "原记录的日子被人动了")
+    #expect(原记录.note == nil, "原记录的备注被人动了")
+
+    let 负数 = try #require(all.first { $0.id != 误记.id })
+    #expect(负数.amount == -5000)
+    #expect(负数.source == .adjustment)
+
+    #expect(try ledger.rawTotal(on: 20260728, itemID: item.id) == 0)
 }
 
 @MainActor
 @Test func 重复修正同一笔不会扣两次() throws {
-    // 用户手快点两下，或两台设备各撤一次。
+    // 用户手快点两下。
+    //
+    // ⚠️ **这条测试走不到「两台设备各撤一次」那条路。** 它是同一个 context 的顺序
+    // 调用，第二次进来时第一笔负数已经在库里，`revoke` 的 note 查重当场命中。
+    // 真正的跨设备是两台机器**各自离线**建出两笔 note 相同、UUID 不同的 adjustment，
+    // CloudKit 合并后两笔都在，而读侧**没有任何按 note 去重的逻辑**：
+    // `+500 +300 −500 −500 = −200`，被 clamp 显示成 0，
+    // **用户真做过的那 300 声就此消失。**
+    // 修法在读侧（`total`/`rawTotal`/`sessions` 按 note 去重），
+    // 但要验得了得有真实 CloudKit 合并——已记进第 3 卷开工前必答的清单。
     let (vm, _, ledger, item, _) = try makeManual()
     let now = 北京(7, 28, 9, 0)
     let a = try ledger.record(item: item, amount: 500, source: .counter,
@@ -287,4 +313,47 @@ private func 库里一条流水都没有(_ ctx: ModelContext) throws -> Bool {
     vm.note = "   "
     let s = try vm.submit(at: 北京(7, 28, 21, 0), timeZone: 北京时间)
     #expect(s.note == nil, "只有空格的备注等于没写")
+}
+
+@MainActor
+@Test func 没选日子就提交什么都不写() throws {
+    // `selectedDayKey` 的初值 0 是「还没选」的哨兵，却一路畅通：
+    // `isFuture(0, 20260728)` 是 false，于是快照与流水都会写下 dayKey 0。
+    // 那笔功课此后在任何地方都看不见——没有哪一天叫「第 0 天」，
+    // 日期选择器回不到那格，修正列表按天查也够不着它去撤销。
+    let (vm, _, _, item, ctx) = try makeManual()
+    vm.selectedItem = item
+    vm.amount = 500
+
+    #expect(!vm.canSubmit(at: 北京(7, 28, 21, 0), timeZone: 北京时间))
+    #expect(throws: ManualEntryError.invalidDay) {
+        try vm.submit(at: 北京(7, 28, 21, 0), timeZone: 北京时间)
+    }
+    #expect(try 库里一条流水都没有(ctx))
+    #expect(try ctx.fetch(FetchDescriptor<DaySnapshot>()).isEmpty, "快照也不许留")
+}
+
+@MainActor
+@Test func 一日起始设成凌晨三点时零点后照样补得了今天() throws {
+    // 「日历页」与「一日起始」是两套坐标系。若拿 `DayKey.today(dayStartHour: 3)`
+    // 当上限去比日历页选出来的 dayKey，凌晨 0 点到 2 点 59 分之间，
+    // **日历上的今天那一格会被判成未来**——按钮灰掉、点下去说「明天的功课还没做」。
+    // 而这三个小时恰恰是这个设置服务的那批人刚做完夜课、最想补记的时候。
+    //
+    // 这条测试不给 VM 传任何 dayStartHour：能不能补，本就不该由它说了算。
+    let (vm, _, ledger, item, _) = try makeManual()
+    let 凌晨一点 = 北京(7, 29, 1, 0)
+    vm.selectedItem = item
+    vm.selectedDayKey = 20260729          // 日历上的今天
+    vm.amount = 500
+
+    #expect(vm.canSubmit(at: 凌晨一点, timeZone: 北京时间))
+    let s = try vm.submit(at: 凌晨一点, timeZone: 北京时间)
+    #expect(s.dayKey == 20260729)
+    #expect(try ledger.rawTotal(on: 20260729, itemID: item.id) == 500)
+
+    // 上限只放到今天为止，明天依旧进不来。
+    vm.selectedDayKey = 20260730
+    vm.amount = 500
+    #expect(!vm.canSubmit(at: 凌晨一点, timeZone: 北京时间))
 }

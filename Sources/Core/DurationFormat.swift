@@ -33,3 +33,22 @@ enum DurationFormat {
         return "\(s) 秒"
     }
 }
+
+/// 时长的**输入**与显示互转：计时类的 `amount` 存的是秒，但没人愿意填 1800。
+///
+/// 与 `DurationFormat` 分开，是因为方向相反——那个是「秒 → 给人看的字」，
+/// 这个是「人转出来的时分 → 秒」，且必须可逆（`split` 与 `seconds` 来回不丢数）。
+///
+/// **住在 Core 而不是补记页里**：Task 16 的计时页在读数超过四小时时也要弹时长转盘
+/// 问用户实际坐了多久，它排在补记页前面。当初把这个类型写在 `ManualEntryView.swift`
+/// 里，等于让 Task 16 引用一个还不存在的类型。
+enum DurationField {
+    static func split(seconds: Int) -> (hours: Int, minutes: Int) {
+        guard seconds > 0 else { return (0, 0) }
+        return (seconds / 3600, (seconds % 3600) / 60)
+    }
+
+    static func seconds(hours: Int, minutes: Int) -> Int {
+        max(0, hours) * 3600 + max(0, minutes) * 60
+    }
+}

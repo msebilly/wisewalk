@@ -6,6 +6,8 @@ enum ManualEntryError: Error, Equatable {
     case nonPositiveAmount
     /// 明天的功课还没做。
     case futureDay
+    /// 选中的日子根本不存在（还没选、或者二月三十一号这种）。
+    case invalidDay
 }
 
 /// 手动补记与修正。
@@ -39,14 +41,43 @@ final class ManualEntryViewModel {
     ///
     /// **「今天」由自己算，与 `submit` 走同一条路**。从前是让调用方传现成的
     /// `today: Int` 进来，那就等于同一份设置被两个方法各收了一份——
-    /// 传的那个若用了别的 `dayStartHour` 或时区，按钮亮着而 `submit` 抛
-    /// `.futureDay`，用户点下去只看到一句「出了点问题」。
+    /// 传的那个若口径不同，按钮亮着而 `submit` 抛 `.futureDay`，
+    /// 用户点下去只看到一句「出了点问题」。
     /// 这个形状在 `CounterViewModel` 与 `TimerViewModel` 上已经各栽过一次。
-    func canSubmit(at now: Date = Date(), dayStartHour: Int = 0,
-                   timeZone: TimeZone = .current) -> Bool {
-        guard selectedItem != nil, amount > 0 else { return false }
-        let today = DayKey.today(dayStartHour: dayStartHour, now: now, timeZone: timeZone)
-        return !DayKey.isFuture(selectedDayKey, comparedTo: today)
+    func canSubmit(at now: Date = Date(), timeZone: TimeZone = .current) -> Bool {
+        (try? validate(at: now, timeZone: timeZone)) != nil
+    }
+
+    /// 三道门，`canSubmit` 与 `submit` 共用一份，好让「按钮亮不亮」与
+    /// 「点下去成不成」永远是同一个答案。
+    private func validate(at now: Date, timeZone: TimeZone)
+        throws -> (item: PracticeItem, amount: Int) {
+        guard let item = selectedItem else { throw ManualEntryError.noItemSelected }
+        guard self.amount > 0 else { throw ManualEntryError.nonPositiveAmount }
+
+        // `selectedDayKey` 的初值 0 是「还没选」的哨兵，可它一路畅通无阻：
+        // `isFuture(0, 20260729)` 是 false，于是按钮亮着、快照写下 dayKey 0、
+        // 流水也写下 dayKey 0。那笔功课此后**在任何地方都看不见**——
+        // 没有哪一天叫「第 0 天」，`DayKey.calendarDate(of: 0)` 返回 nil，
+        // 日期选择器永远回不到那格，修正列表按天查也够不着它去撤销。
+        // 丢得静悄悄，而且不可恢复。
+        guard DayKey.calendarDate(of: selectedDayKey, timeZone: timeZone) != nil else {
+            throw ManualEntryError.invalidDay
+        }
+
+        // **拿日历今天当上限，不是拿「一日起始」算出来的今天。**
+        //
+        // 这两个是不同的坐标系（见 `DayKeyCalendar` 的类型注释）：用户点的是
+        // 日历格子，而 `DayKey.today(dayStartHour:)` 会把 dayStartHour 减掉。
+        // 混着比大小的后果，在 dayStartHour 设成 3:00 时立刻现形：
+        // 凌晨 0 点到 2 点 59 分之间，日历上的**今天那一格**会被判成未来，
+        // 按钮灰掉、点下去说「明天的功课还没做」。
+        // 而这三个小时恰恰是这个设置服务的那批人——刚做完夜课、最想补记的时候。
+        let latestPossible = DayKey.fromCalendarDate(now, timeZone: timeZone)
+        guard !DayKey.isFuture(selectedDayKey, comparedTo: latestPossible) else {
+            throw ManualEntryError.futureDay
+        }
+        return (item, self.amount)
     }
 
     /// 补记一笔。
@@ -58,13 +89,17 @@ final class ManualEntryViewModel {
     ///
     /// 若靠回拨 `at:` 来补记，会连带篡改 `createdAt`（快照去重排序与第 3 卷诊断都依赖它）
     /// 和历史时区偏移，让「这条何时写下」永远说不清。
+    /// **不收 `dayStartHour`。** 传了 `onDay:` 之后 `DayLedger.stage` 里那句
+    /// `onDay ?? DayKey.make(..., dayStartHour:)` 走的是前一支，dayStartHour 一个字
+    /// 都用不上；而「今天」这道上限按日历页算（见 `validate`），也用不上它。
+    /// 留一个不起作用的参数，只会让人以为「一日起始会影响补记落在哪天」——
+    /// `revoke` 的 `timeZone` 刚犯过同样的毛病。
     @discardableResult
     func submit(
         at now: Date = Date(),
-        dayStartHour: Int = 0,
         timeZone: TimeZone = .current
     ) throws -> PracticeSession {
-        try submit(note: trimmedNote, at: now, dayStartHour: dayStartHour, timeZone: timeZone)
+        try submit(note: trimmedNote, at: now, timeZone: timeZone)
     }
 
     /// §6.12 迁移入口：把历史累计记成一笔起始流水。
@@ -74,31 +109,23 @@ final class ManualEntryViewModel {
     @discardableResult
     func submitMigrationTotal(
         at now: Date = Date(),
-        dayStartHour: Int = 0,
         timeZone: TimeZone = .current
     ) throws -> PracticeSession {
-        try submit(note: Self.migrationNote, at: now, dayStartHour: dayStartHour, timeZone: timeZone)
+        try submit(note: Self.migrationNote, at: now, timeZone: timeZone)
     }
 
     private func submit(
         note: String?,
         at now: Date,
-        dayStartHour: Int,
         timeZone: TimeZone
     ) throws -> PracticeSession {
-        guard let item = selectedItem else { throw ManualEntryError.noItemSelected }
-        guard self.amount > 0 else { throw ManualEntryError.nonPositiveAmount }
-        // **把校验过的数抄成局部量再往下走。**
+        // 三道门与 `canSubmit` 共用，且**把校验过的数抄成局部量带出来**。
         // 从前底下那句 `record` 直接读 `self.amount`，于是「校验的是哪个数」
         // 与「记进账本的是哪个数」中间隔着两次会抛的 I/O，全靠「这中间没人改它」
         // 这个默契撑着——而这份默契在代码里一个字都没写。
         // Step 9 变异 3 一挪清空的位置，`record` 当场收到 0：证据就在那儿。
         // 这是个只增不减的账本，往里写的那个数不该是可变状态的即时读数。
-        let amount = self.amount
-        let today = DayKey.today(dayStartHour: dayStartHour, now: now, timeZone: timeZone)
-        guard !DayKey.isFuture(selectedDayKey, comparedTo: today) else {
-            throw ManualEntryError.futureDay
-        }
+        let (item, amount) = try validate(at: now, timeZone: timeZone)
 
         // §6.4：补记历史日期时，若该日快照不存在则按当日配置补建；已存在则沿用，绝不覆盖。
         // 不补建的话，第 5 卷月历翻到那天会显示「无课」，而明明记着 500 声。
@@ -124,7 +151,6 @@ final class ManualEntryViewModel {
             startedAt: now,
             endedAt: now,
             at: now,
-            dayStartHour: dayStartHour,
             timeZone: timeZone,
             note: note,
             onDay: selectedDayKey

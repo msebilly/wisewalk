@@ -50,7 +50,7 @@ final class DayLedger {
             dayStartHour: dayStartHour, timeZone: timeZone,
             id: id, note: note, onDay: onDay
         )
-        try context.save()
+        try saveOrRollback()
         return session
     }
 
@@ -136,8 +136,34 @@ final class DayLedger {
             createdAt: now
         )
         context.insert(adjustment)
-        try context.save()
+        try saveOrRollback()
         return adjustment
+    }
+
+    /// 落盘，失败就把这次的 insert 撤干净再把错抛出去。
+    ///
+    /// 实测（SDK 26.5）：`save()` 抛错时 store 会一致地回滚，但 **context 的 pending
+    /// 改动不会被清掉**。账本的两个写入口若就这么把错抛出去，那笔已经 insert 进
+    /// context 的流水会一直挂在那儿，被下一次**无关的** save() 顺手提交。
+    ///
+    /// 补记这条路上它最够得着，因为补记没有草稿兜底：
+    /// 用户补记 500 声 → 磁盘满，save 抛错 → 界面老老实实说「记录失败」→
+    /// 用户转身去点计数器 → `DraftStore.update` 每点一下就 save 一次（同一个
+    /// mainContext）→ 那笔 500 声悄没声儿地落了盘。
+    /// **告诉用户没记上、账本上却有**，正顶着「一声都不能多」。
+    ///
+    /// 用户重试一次也一样脏：`plan()` 那句 save 会先把残留的第一笔冲下去，
+    /// `record` 再插一笔全新 UUID 的——500 变 1000。
+    ///
+    /// `DraftStore.commit` 早就为同一个理由做了这件事（`DraftStore.swift` 的
+    /// `rollback()` 那段），只是当时没往账本这边看。
+    private func saveOrRollback() throws {
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
+        }
     }
 
     // MARK: - 读
@@ -232,7 +258,7 @@ final class DayLedger {
             goals: goals
         )
         context.insert(snapshot)
-        try context.save()
+        try saveOrRollback()
         return DayPlan(dayKey: dayKey, requiredItemIDs: snapshot.requiredItemIDs, goals: goals)
     }
 

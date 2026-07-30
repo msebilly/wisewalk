@@ -50,3 +50,18 @@ import Testing
 @Test func 口语时长负数按零处理() {
     #expect(DurationFormat.spoken(-30) == "0 秒")
 }
+
+@MainActor
+@Test func 时长选择器在秒与时分之间来回不丢数() {
+    #expect(DurationField.split(seconds: 0) == (0, 0))
+    #expect(DurationField.split(seconds: 1800) == (0, 30))
+    #expect(DurationField.split(seconds: 3665) == (1, 1), "不足一分钟的零头不显示")
+    #expect(DurationField.seconds(hours: 1, minutes: 30) == 5400)
+    #expect(DurationField.seconds(hours: 0, minutes: 0) == 0)
+}
+
+@MainActor
+@Test func 时长选择器拒绝负数() {
+    #expect(DurationField.seconds(hours: -1, minutes: -30) == 0)
+    #expect(DurationField.split(seconds: -60) == (0, 0))
+}
