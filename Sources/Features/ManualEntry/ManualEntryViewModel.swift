@@ -133,16 +133,25 @@ final class ManualEntryViewModel {
         //
         // ⚠️ **这是 `docs/design-spec.md` §5.6 那个问题的第二个写侧入口**（第一个是
         // `TodayViewModel.reload`）。换新机后 CloudKit 只同步到一半时补记一笔历史，
-        // 就会拿**此刻本机看得见的**定课集合给那一天永久定格快照——
-        // 而「已存在则沿用、绝不覆盖」意味着**再也改不回来**。
-        // 第 3 卷开真实同步之前必须先答 §5.6 的三个问题，答完回来看这里。
+        // 就会拿**此刻本机看得见的**定课集合给那一天永久定格快照。
+        // §5.6 已于 2026-07-30 定案：`plan` 在该日已有快照时会把「那天之前就立好、
+        // 只是数据晚到」的定课追加进来，所以这里定格得早不再是永久损失。
+        // 但**只在有人再次为那一天调 `plan` 时才自愈**——补记完就再不碰那天的话，
+        // 它会一直缺着。第 5 卷月历走只读路径，不会替它补。
         //
         // ⚠️ 还有一层：这一句**自己会 save**。它成功之后 `record` 若抛错（磁盘满等），
         // 库里就留下一个「有快照、一笔流水都没有」的历史日——第 5 卷月历翻到那天
         // 会说「这几门功课你一门都没做」，而用户那天可能压根还没建这些功课。
         // **编一个失败比说「无课」更糟。** 用户重新补记一次会自愈（快照沿用、流水补上）。
         // 没在这一卷动它，是因为把两次 save 合成一次要改第一卷已封存的 `DayLedger`。
-        _ = try ledger.plan(for: selectedDayKey, activeItems: try items.activeItems())
+        // 补记页的 dayKey 出自日历格子，不减 dayStartHour，故此处传 0——
+        // `plan` 要求这把尺子跟算 dayKey 的那把一致，见它的参数文档。
+        _ = try ledger.plan(
+            for: selectedDayKey,
+            activeItems: try items.activeItems(),
+            dayStartHour: 0,
+            timeZone: timeZone
+        )
 
         let session = try ledger.record(
             item: item,

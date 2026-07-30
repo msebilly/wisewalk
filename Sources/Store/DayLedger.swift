@@ -239,9 +239,26 @@ final class DayLedger {
     ///
     /// 代价（已知并接受）：已归档的功课当天可能多唠叨一次，
     /// 某天也可能在更全的信息同步进来后由圆满退回待完成。
-    func plan(for dayKey: Int, activeItems: [PracticeItem]) throws -> DayPlan {
+    /// - Parameter dayStartHour: **必须与算出 `dayKey` 的那把尺子一致。**
+    ///   今日页的 `dayKey` 出自 `DayKey.today(dayStartHour:)`，就传同一个值；
+    ///   补记页的 `selectedDayKey` 出自 `DayKey.fromCalendarDate`（日历格子，不减 dayStartHour），
+    ///   就传 `0`。两把尺子混着比大小的后果，`ManualEntryViewModel.validate` 的注释里有实例。
+    ///   **本参数没有默认值，就是要每个调用点自己说清楚用的哪把尺子**——
+    ///   本仓库的 `dayStartHour: Int = 0` 已经害过一次：漏传一处就静默退回 0 点，没有任何测试会红。
+    func plan(
+        for dayKey: Int,
+        activeItems: [PracticeItem],
+        dayStartHour: Int,
+        timeZone: TimeZone
+    ) throws -> DayPlan {
         if let existing = try existingPlan(for: dayKey) {
-            return existing
+            return try appendLateArrivals(
+                to: existing,
+                dayKey: dayKey,
+                activeItems: activeItems,
+                dayStartHour: dayStartHour,
+                timeZone: timeZone
+            )
         }
 
         let required = activeItems.filter { !$0.isArchived }
@@ -260,6 +277,75 @@ final class DayLedger {
         context.insert(snapshot)
         try saveOrRollback()
         return DayPlan(dayKey: dayKey, requiredItemIDs: snapshot.requiredItemIDs, goals: goals)
+    }
+
+    /// 该日已有快照时，把「那天开始之前就立好、只是数据晚到」的定课追加进去。
+    ///
+    /// **为什么需要它**（`docs/design-spec.md` §5.6 写侧，2026-07-30 定案走此路）：
+    /// 换新机或重装后首次启动，CloudKit 可能一条定课都还没推下来。此时今日页一露面
+    /// 就给今天定格了一条 `requiredItemIDs: []` 的快照，那天从此是「无课日」——
+    /// `TodayViewModel.isRestDay` 的文档写明它**不计入分母，也不中断**，
+    /// 等于替用户抹掉一天欠账；而且推给了所有设备，「已存在则沿用」意味着再也改不回来。
+    ///
+    /// **判据是「这门课是不是那天开始之前就立的」，不是「本机是不是刚看见它」。**
+    /// 后者分不清「同步迟到」与「用户今天刚立」，而今天新立的课按现行规矩从明天算起——
+    /// 无差别并进来就成了「立一门课当场欠一天账」，方向同样是「多」。
+    /// `PracticeItem.createdAt` 记的是立课那一刻，与它何时同步到本机无关，正是要问的那句话。
+    ///
+    /// **两个 dayKey 直接比，不把 dayKey 反解成 Date。**
+    /// `DayKeyCalendar.calendarDate(of:)` 的注释讲过为什么不能取零点：
+    /// 夏令时切换日的零点根本不存在，构造出来是 nil 或被日历悄悄挪到前一天。
+    /// 把 `createdAt` 也换算成 dayKey 问的是同一件事，却全程不碰 Date 重建。
+    ///
+    /// `createdAt` 若是 `.distantPast`（CloudKit 推来的记录缺该字段时的兜底值），
+    /// 算出来的 dayKey 远小于任何真实日期，于是**一律追加**。方向是保守那一侧：
+    /// 进了分母顶多显示未圆满，漏掉才是替他免单。
+    ///
+    /// **没有迟到项就一个字都不落盘**，否则每次 reload 都写一条。
+    /// 追加的是**新的一条**快照，原有各条纹丝不动——「快照绝不回溯改写」的铁律不破；
+    /// 并集交给 `merge`，幂等且可交换，两台设备各追加一条也不会出错。
+    ///
+    /// **本方法只补当次调用问的那一天。** 月历一律走只读的 `existingPlan(for:)`，
+    /// 所以昨天若定格空了就永远是空的。不去回溯补，是因为给一个已经过去、
+    /// 再也补不了的日子凭空造欠账，比留一天空白更坏——今天还能补做，昨天不能。
+    ///
+    /// **判据绝不可套到初次定格上。** 初次定格照收全部在册定课，哪怕它们是今天才立的：
+    /// 新用户补录过去三十天，那些课全是今天立的，一滤就是三十条空快照，
+    /// 每天记着几百声却显示「无课」——正是本方法要治的病，反被治法造出来。
+    /// 守卫见 `初次定格仍旧收下全部在册定课`。
+    private func appendLateArrivals(
+        to existing: DayPlan,
+        dayKey: Int,
+        activeItems: [PracticeItem],
+        dayStartHour: Int,
+        timeZone: TimeZone
+    ) throws -> DayPlan {
+        let known = Set(existing.requiredItemIDs)
+        let late = activeItems.filter { item in
+            guard !item.isArchived, !known.contains(item.id) else { return false }
+            let born = DayKey.make(
+                from: item.createdAt,
+                tzOffsetMinutes: DayKey.currentOffsetMinutes(at: item.createdAt, timeZone: timeZone),
+                dayStartHour: dayStartHour
+            )
+            return born < dayKey
+        }
+        guard !late.isEmpty else { return existing }
+
+        var goals: [String: Int] = [:]
+        for item in late {
+            if let goal = item.dailyGoal, goal > 0 {
+                goals[item.id.uuidString] = goal
+            }
+        }
+        context.insert(
+            DaySnapshot(dayKey: dayKey, requiredItemIDs: late.map(\.id), goals: goals)
+        )
+        try saveOrRollback()
+
+        // 追加这条必须和原有各条一起重过 `merge`：目标的取值规则是
+        // 「含该项的最早一条快照」，在这里自己拼会绕过它。
+        return try existingPlan(for: dayKey) ?? existing
     }
 
     /// 把同日多条快照合并成只读 `DayPlan`。纯函数，不碰上下文，故不会写库。

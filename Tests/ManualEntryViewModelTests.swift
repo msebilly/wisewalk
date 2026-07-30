@@ -86,7 +86,7 @@ private func 库里一条流水都没有(_ ctx: ModelContext) throws -> Bool {
 @Test func 补记不覆盖已有快照() throws {
     // §6.4：若已存在则沿用，**绝不覆盖**。
     let (vm, items, ledger, item, _) = try makeManual()
-    let 原计划 = try ledger.plan(for: 20260701, activeItems: [item])
+    let 原计划 = try ledger.plan(for: 20260701, activeItems: [item], dayStartHour: 0, timeZone: 北京时间)
     #expect(原计划.goals[item.id.uuidString] == 1000, "前提：当时目标是 1000")
 
     // 之后用户把目标改到 3000，再回头补记 7 月 1 日

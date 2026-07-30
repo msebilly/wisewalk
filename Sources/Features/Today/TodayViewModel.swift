@@ -82,8 +82,9 @@ final class TodayViewModel {
     /// 因为「用户真正打开或记录某天」才准定格快照——见本卷计划的总纪律与
     /// `DayLedger.plan(for:activeItems:)` 自己的文档注释。
     /// （design-spec §4.2 只写到「每天首次产生记录时冻结」，「打开今日页也算」是本卷的补充口径；
-    /// Task 14 会在 `.task` 与 `scenePhase == .active` 时调本方法，**「进前台」算不算「真正打开」
-    /// 尚未定案**，定案前别把这条路径铺得更宽。）
+    /// Task 14 会在 `.task` 与 `scenePhase == .active` 时调本方法。
+    /// 「进前台」算不算「真正打开」曾经悬而未决，Task 13.5 之后**不必再纠结**：
+    /// 提前定格出的残缺快照会被 `DayLedger` 的追加逻辑补回来，误触发不再是永久损失。）
     /// 它在该日已有快照时不会再写，所以反复 reload 是安全的。
     /// **第 5 卷的月历必须改用 `existingPlan(for:)`**，否则往回翻三个月就是伪造九十天历史。
     func reload(
@@ -93,7 +94,12 @@ final class TodayViewModel {
     ) throws {
         let key = DayKey.today(dayStartHour: dayStartHour, now: now, timeZone: timeZone)
         let active = try items.activeItems()
-        let plan = try ledger.plan(for: key, activeItems: active)
+        let plan = try ledger.plan(
+            for: key,
+            activeItems: active,
+            dayStartHour: dayStartHour,
+            timeZone: timeZone
+        )
 
         // 快照里可能有「登记时还活跃、现在已归档」的项。它们仍要显示：
         // 圆满判定一律读快照，藏起来会让今日页与月历口径打架（详见本文件顶上的取舍说明）。

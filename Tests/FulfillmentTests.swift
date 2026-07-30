@@ -28,7 +28,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     ctx.insert(a); ctx.insert(b)
     try ctx.save()
 
-    let snap = try ledger.plan(for: 20260728, activeItems: [a, b])
+    let snap = try ledger.plan(for: 20260728, activeItems: [a, b], dayStartHour: 0, timeZone: 北京时间)
     #expect(Set(snap.requiredItemIDs) == [a.id, b.id])
     #expect(snap.goals[a.id.uuidString] == 1000)
     #expect(snap.goals[b.id.uuidString] == nil, "未设目标的项不进 goals 字典")
@@ -41,12 +41,12 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     ctx.insert(a)
     try ctx.save()
 
-    _ = try ledger.plan(for: 20260728, activeItems: [a])
+    _ = try ledger.plan(for: 20260728, activeItems: [a], dayStartHour: 0, timeZone: 北京时间)
 
     a.dailyGoal = 3000
     try ctx.save()
 
-    let again = try ledger.plan(for: 20260728, activeItems: [a])
+    let again = try ledger.plan(for: 20260728, activeItems: [a], dayStartHour: 0, timeZone: 北京时间)
     #expect(again.goals[a.id.uuidString] == 1000, "过去的日子不许被今天的设置改写")
 }
 
@@ -65,7 +65,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     ctx.insert(late); ctx.insert(early)
     try ctx.save()
 
-    let snap = try ledger.plan(for: 20260728, activeItems: [a])
+    let snap = try ledger.plan(for: 20260728, activeItems: [a], dayStartHour: 0, timeZone: 北京时间)
     #expect(snap.goals[a.id.uuidString] == 1000, "去重必须确定性地取最早那条")
 }
 
@@ -86,7 +86,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     ctx.insert(late); ctx.insert(early)
     try ctx.save()
 
-    let snap = try ledger.plan(for: 20260728, activeItems: [a, b])
+    let snap = try ledger.plan(for: 20260728, activeItems: [a, b], dayStartHour: 0, timeZone: 北京时间)
     #expect(Set(snap.requiredItemIDs) == [a.id, b.id], "应做项应取并集，b 不能丢")
     #expect(snap.goals[a.id.uuidString] == 1000, "a 已在最早快照，最早目标为准")
 }
@@ -108,7 +108,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     ctx.insert(late); ctx.insert(early)
     try ctx.save()
 
-    let snap = try ledger.plan(for: 20260728, activeItems: [a, b])
+    let snap = try ledger.plan(for: 20260728, activeItems: [a, b], dayStartHour: 0, timeZone: 北京时间)
     #expect(snap.goals[b.id.uuidString] == 1800, "并集新增项沿用其来源快照的目标")
 }
 
@@ -173,7 +173,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     ctx.insert(late); ctx.insert(early)
     try ctx.save()
 
-    _ = try ledger.plan(for: 20260728, activeItems: [a, b])
+    _ = try ledger.plan(for: 20260728, activeItems: [a, b], dayStartHour: 0, timeZone: 北京时间)
 
     let key = 20260728
     let remaining = try ctx.fetch(
@@ -213,7 +213,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     ctx.insert(a); ctx.insert(old)
     try ctx.save()
 
-    let snap = try ledger.plan(for: 20260728, activeItems: [a, old])
+    let snap = try ledger.plan(for: 20260728, activeItems: [a, old], dayStartHour: 0, timeZone: 北京时间)
     #expect(snap.requiredItemIDs == [a.id])
 }
 
@@ -223,7 +223,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     let a = PracticeItem(name: "念佛", dailyGoal: 1000)
     ctx.insert(a)
     try ctx.save()
-    let snap = try ledger.plan(for: 20260728, activeItems: [a])
+    let snap = try ledger.plan(for: 20260728, activeItems: [a], dayStartHour: 0, timeZone: 北京时间)
 
     let now = 北京(7, 28, 9)
     try ledger.record(item: a, amount: 500, source: .counter,
@@ -238,7 +238,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     let a = PracticeItem(name: "念佛", dailyGoal: 1000)
     ctx.insert(a)
     try ctx.save()
-    let snap = try ledger.plan(for: 20260728, activeItems: [a])
+    let snap = try ledger.plan(for: 20260728, activeItems: [a], dayStartHour: 0, timeZone: 北京时间)
 
     let now = 北京(7, 28, 9)
     try ledger.record(item: a, amount: 1000, source: .counter,
@@ -253,7 +253,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     let a = PracticeItem(name: "放生", measureType: .check, dailyGoal: nil)
     ctx.insert(a)
     try ctx.save()
-    let snap = try ledger.plan(for: 20260728, activeItems: [a])
+    let snap = try ledger.plan(for: 20260728, activeItems: [a], dayStartHour: 0, timeZone: 北京时间)
 
     #expect(try ledger.fulfillment(of: a.id, plan: snap) == .pending)
 
@@ -271,7 +271,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     ctx.insert(a); ctx.insert(b)
     try ctx.save()
     // 只把 a 列入当日清单
-    let snap = try ledger.plan(for: 20260728, activeItems: [a])
+    let snap = try ledger.plan(for: 20260728, activeItems: [a], dayStartHour: 0, timeZone: 北京时间)
 
     #expect(try ledger.fulfillment(of: b.id, plan: snap) == .notRequired)
 }
@@ -282,7 +282,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int) -> Date {
     let a = PracticeItem(name: "念佛", dailyGoal: 1000)
     ctx.insert(a)
     try ctx.save()
-    let snap = try ledger.plan(for: 20260728, activeItems: [a])
+    let snap = try ledger.plan(for: 20260728, activeItems: [a], dayStartHour: 0, timeZone: 北京时间)
 
     let now = 北京(7, 28, 9)
     let s = try ledger.record(item: a, amount: 1000, source: .counter,

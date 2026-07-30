@@ -172,7 +172,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
                                 dailyGoal: 1000, iconName: "circle.grid.3x3",
                                 colorHex: Palette.Light.fulfilled)
     let 昨天 = 20260727
-    let plan = try ledger.plan(for: 昨天, activeItems: [item])
+    let plan = try ledger.plan(for: 昨天, activeItems: [item], dayStartHour: 0, timeZone: 北京时间)
     let now = 北京(7, 27, 9, 0)
     try ledger.record(item: item, amount: 1000, source: .counter,
                       startedAt: now, at: now, timeZone: 北京时间, onDay: 昨天)
