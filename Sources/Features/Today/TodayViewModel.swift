@@ -85,7 +85,7 @@ final class TodayViewModel {
     /// Task 14 会在 `.task` 与 `scenePhase == .active` 时调本方法。
     /// 「进前台」算不算「真正打开」曾经悬而未决，Task 13.5 之后**不必再纠结**：
     /// 提前定格出的残缺快照会被 `DayLedger` 的追加逻辑补回来，误触发不再是永久损失。）
-    /// 它在该日已有快照时不会再写，所以反复 reload 是安全的。
+    /// 它在该日**已有快照且没有迟到项**时才不写，所以反复 reload 是安全的。
     /// **第 5 卷的月历必须改用 `existingPlan(for:)`**，否则往回翻三个月就是伪造九十天历史。
     func reload(
         now: Date = Date(),

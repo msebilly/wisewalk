@@ -129,7 +129,7 @@ final class ManualEntryViewModel {
 
         // §6.4：补记历史日期时，若该日快照不存在则按当日配置补建；已存在则沿用，绝不覆盖。
         // 不补建的话，第 5 卷月历翻到那天会显示「无课」，而明明记着 500 声。
-        // `plan(for:activeItems:)` 本身就是「没有才建、有了不动」，直接调即可。
+        // `plan(for:activeItems:…)` 是「没有就建、有了就把同步迟到的项补进去」，直接调即可。
         //
         // ⚠️ **这是 `docs/design-spec.md` §5.6 那个问题的第二个写侧入口**（第一个是
         // `TodayViewModel.reload`）。换新机后 CloudKit 只同步到一半时补记一笔历史，

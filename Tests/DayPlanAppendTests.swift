@@ -54,7 +54,10 @@ private func 课(_ name: String, 立于 born: Date, 目标 goal: Int? = nil, 归
     _ = try ledger.plan(for: 20260728, activeItems: [念佛], dayStartHour: 0, timeZone: 北京)
     let 后 = try ledger.plan(for: 20260728, activeItems: [念佛, 诵经], dayStartHour: 0, timeZone: 北京)
 
-    // 立一门课不该当场欠一天账。诵经从明天算起。
+    // 下午才立的课不该被追加进上午已经定格好的今天——
+    // 那等于让「上午已显示圆满」的一天因为下午添了门功课而退回未圆满。
+    // 注意这与初次定格**不对称**（见 `appendLateArrivals` 的注释）：
+    // 该日尚无快照时，今天刚立的课是照收的。
     #expect(后.requiredItemIDs == [念佛.id])
 }
 
@@ -68,11 +71,12 @@ private func 课(_ name: String, 立于 born: Date, 目标 goal: Int? = nil, 归
         _ = try ledger.plan(for: 20260728, activeItems: [念佛], dayStartHour: 0, timeZone: 北京)
     }
 
-    // 另开一个上下文问「盘上到底有几条」——同一个 context 会把待写的也算进来。
-    let 独立 = ModelContext(try ModelContainerFactory.inMemory())
-    _ = 独立
-    let 全部 = try ctx.fetch(FetchDescriptor<DaySnapshot>())
-    #expect(全部.count == 1)
+    // 另开一个**同容器**的 context 才问得出「盘上到底有几条」：
+    // `FetchDescriptor.includePendingChanges` 默认 true，同一个 ctx 上查会把未落盘的
+    // insert 也算进去，证明不了任何事。注意不能用 `ModelContainerFactory.inMemory()`——
+    // 那是**另造一个容器**，跟 ctx 毫无关系，查出来永远是 0。
+    let 盘上 = ModelContext(ctx.container)
+    #expect(try 盘上.fetch(FetchDescriptor<DaySnapshot>()).count == 1)
 }
 
 @Test @MainActor func 追加过一次就不会再追加() throws {
@@ -81,12 +85,14 @@ private func 课(_ name: String, 立于 born: Date, 目标 goal: Int? = nil, 归
     let 打坐 = 课("打坐", 立于: 时刻(7, 22, 9))
     ctx.insert(念佛); ctx.insert(打坐)
 
-    _ = try ledger.plan(for: 20260728, activeItems: [念佛], dayStartHour: 0, timeZone: 北京)
+    let 初 = try ledger.plan(for: 20260728, activeItems: [念佛], dayStartHour: 0, timeZone: 北京)
+    #expect(初.requiredItemIDs == [念佛.id], "定格这步得真把念佛记下，否则下面数出的 2 条说明不了问题")
     _ = try ledger.plan(for: 20260728, activeItems: [念佛, 打坐], dayStartHour: 0, timeZone: 北京)
     _ = try ledger.plan(for: 20260728, activeItems: [念佛, 打坐], dayStartHour: 0, timeZone: 北京)
 
     // 初次一条 + 追加一条 = 两条。第三次调用不该再添。
-    #expect(try ctx.fetch(FetchDescriptor<DaySnapshot>()).count == 2)
+    // 同样要问同容器的另一个 context，否则「只 insert 没 save」也会被算成落了盘。
+    #expect(try ModelContext(ctx.container).fetch(FetchDescriptor<DaySnapshot>()).count == 2)
 }
 
 @Test @MainActor func 已归档的迟到定课不会被追加() throws {
@@ -122,7 +128,7 @@ private func 课(_ name: String, 立于 born: Date, 目标 goal: Int? = nil, 归
 
     let 计划 = try ledger.plan(for: 20260725, activeItems: [念佛], dayStartHour: 0, timeZone: 北京)
 
-    // **createdAt 判据只管追加，绝不能套到初次定格上。**
+    // **activatedAt 判据只管追加，绝不能套到初次定格上。**
     // 套上去的话，新用户补录过去三十天会得到三十条空快照，
     // 每一天都记着几百声却显示「无课」——正是 §5.6 要治的那个病，反倒被治法造出来。
     #expect(计划.requiredItemIDs == [念佛.id])
@@ -138,7 +144,7 @@ private func 课(_ name: String, 立于 born: Date, 目标 goal: Int? = nil, 归
     for it in 全 { ctx.insert(it) }
 
     let 愈 = try ledger.plan(for: 20260728, activeItems: 全, dayStartHour: 0, timeZone: 北京)
-    #expect(愈.requiredItemIDs.count == 3)
+    #expect(Set(愈.requiredItemIDs) == Set(全.map(\.id)), "补回来的得正是这三门，不能只是凑够个数")
 }
 
 @Test @MainActor func 今天恢复的归档定课不会被追加进今天() throws {
@@ -148,14 +154,33 @@ private func 课(_ name: String, 立于 born: Date, 目标 goal: Int? = nil, 归
     ctx.insert(念佛); ctx.insert(打坐)
 
     // 早上定格时打坐还归着，不在快照里。
-    _ = try ledger.plan(for: 20260728, activeItems: [念佛], dayStartHour: 0, timeZone: 北京)
+    let 初 = try ledger.plan(for: 20260728, activeItems: [念佛], dayStartHour: 0, timeZone: 北京)
+    #expect(初.requiredItemIDs == [念佛.id], "定格得真发生过；空快照会让打坐从追加路径混进来，这条就白守了")
 
-    // 下午才恢复——跟今天新立的课同待遇，从明天算起。
-    // 追加进今天就等于把他今天已经挣到的圆满收回去。
+    // 下午才恢复。追加进今天就等于把他今天已经挣到的圆满收回去。
     try PracticeItemStore(context: ctx).unarchive(打坐, at: 时刻(7, 28, 15))
+    #expect(打坐.isArchived == false, "恢复得真成功；没恢复的话它会被 !isArchived 挡掉，这条就为错误的原因通过了")
 
     let 后 = try ledger.plan(for: 20260728, activeItems: [念佛, 打坐], dayStartHour: 0, timeZone: 北京)
     #expect(后.requiredItemIDs == [念佛.id])
+}
+
+@Test @MainActor func 对本来就活着的课调恢复不会顶掉它的激活时刻() throws {
+    let (ledger, ctx) = try 建()
+    let 念佛 = 课("念佛", 立于: 时刻(7, 20, 9))
+    let 打坐 = 课("打坐", 立于: 时刻(7, 22, 9))
+    ctx.insert(念佛); ctx.insert(打坐)
+
+    let 初 = try ledger.plan(for: 20260728, activeItems: [念佛], dayStartHour: 0, timeZone: 北京)
+    #expect(初.requiredItemIDs == [念佛.id])
+
+    // 打坐从没归档过。UI 上一个按钮连点两下、或列表刷新重放一次动作就会这样调。
+    // `unarchive` 若不先看它归没归着就改 `activatedAt`，这门 7/22 就立好的课
+    // 会被判成「今天才激活」，从此再也补不回 7/28——方向是「多」，替用户免掉一门。
+    try PracticeItemStore(context: ctx).unarchive(打坐, at: 时刻(7, 28, 15))
+
+    let 后 = try ledger.plan(for: 20260728, activeItems: [念佛, 打坐], dayStartHour: 0, timeZone: 北京)
+    #expect(Set(后.requiredItemIDs) == Set([念佛.id, 打坐.id]))
 }
 
 @Test @MainActor func 昨天恢复的归档定课同步进来后仍要被追加() throws {
@@ -164,11 +189,13 @@ private func 课(_ name: String, 立于 born: Date, 目标 goal: Int? = nil, 归
     let 打坐 = 课("打坐", 立于: 时刻(7, 1, 9), 归档: true)
     ctx.insert(念佛); ctx.insert(打坐)
 
-    _ = try ledger.plan(for: 20260728, activeItems: [念佛], dayStartHour: 0, timeZone: 北京)
+    let 初 = try ledger.plan(for: 20260728, activeItems: [念佛], dayStartHour: 0, timeZone: 北京)
+    #expect(初.requiredItemIDs == [念佛.id], "定格得真发生过，否则打坐是被「整体重建」加回来的，不是被追加的")
 
     // 昨晚就在 iPad 上恢复了，今天本机才同步到——那时它确实是今天该做的。
     // 这一条与上一条只差在「恢复发生在哪一天」，正是 activatedAt 记的东西。
     try PracticeItemStore(context: ctx).unarchive(打坐, at: 时刻(7, 27, 21))
+    #expect(打坐.isArchived == false, "恢复得真成功，否则它连 !isArchived 那一关都过不去")
 
     let 后 = try ledger.plan(for: 20260728, activeItems: [念佛, 打坐], dayStartHour: 0, timeZone: 北京)
     #expect(Set(后.requiredItemIDs) == Set([念佛.id, 打坐.id]))
