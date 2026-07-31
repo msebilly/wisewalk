@@ -372,3 +372,21 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int, _ s: Int = 0) -> D
     #expect(!vm.isRunning)
     #expect(vm.elapsed == 0)
 }
+
+@MainActor
+@Test func 坐第二回时今日坐数还是一坐等收了才算两坐() throws {
+    // 第一坐收了 → dayRounds 1；第二坐还在进行中 → 仍是 1，收了才是 2。
+    // 本轮尚未入账，不该把自己算进去；先算进去的实现会在中间那一步给出 2。
+    let (vm, _, _, _, _) = try makeTimer()
+    #expect(vm.dayRounds == 0, "还没坐过")
+
+    try vm.start(at: 北京(7, 28, 6, 0), timeZone: 北京时间)
+    #expect(vm.dayRounds == 0, "第一坐还在进行中，不许先把自己算进去")
+    _ = try vm.finish(at: 北京(7, 28, 6, 30))
+    #expect(vm.dayRounds == 1)
+
+    try vm.start(at: 北京(7, 28, 20, 0), timeZone: 北京时间)
+    #expect(vm.dayRounds == 1, "第二坐还在进行中，仍是一坐")
+    _ = try vm.finish(at: 北京(7, 28, 20, 30))
+    #expect(vm.dayRounds == 2)
+}

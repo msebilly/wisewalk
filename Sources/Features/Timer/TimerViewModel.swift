@@ -70,6 +70,10 @@ final class TimerViewModel {
     /// 进入本轮之前，`committedDayKey` 那天这一项已经记进账本的秒数。
     private(set) var committedTotal: Int = 0
 
+    /// 今日已收坐的坐数。**本轮尚未算进去**——`start()` 读入时特意把进行中的自己排除，
+    /// 收坐（`commitAndClear`）才 +1。副标题要说「今日 N 坐」，单看总时长分不出是坐了几回。
+    private(set) var dayRounds: Int = 0
+
     /// 今天一共坐了多久。用户要看的是这个，而不只是「这一轮坐了多久」。
     ///
     /// ⚠️ 页面开着的时候日子若翻过去，这个数在**下一次 `finish()` 或 `start()` 之前**
@@ -132,13 +136,15 @@ final class TimerViewModel {
         // committedDayKey 还是旧的」这种半新半旧的状态——它算不出崩溃，
         // 只会让屏幕上的今日悄悄偏一点，而这正是最难查的那种偏。
         let dayKey = DayKey.today(dayStartHour: dayStartHour, now: now, timeZone: timeZone)
-        let total = try ledger.total(on: dayKey, itemID: item.id)
+        let (total, rounds) = try (ledger.total(on: dayKey, itemID: item.id),
+                                   ledger.roundCount(on: dayKey, itemID: item.id))
         let existing = try drafts.begin(itemID: item.id, source: .timer, at: now)
 
         self.dayStartHour = dayStartHour
         self.timeZone = timeZone
         committedDayKey = dayKey
         committedTotal = total
+        dayRounds = rounds
         draft = existing
         startedAt = existing.startedAt
         lastHeartbeat = existing.updatedAt
@@ -240,6 +246,8 @@ final class TimerViewModel {
         // 已经入账，从「本次」挪到「今日已记」。
         // 不挪的话，同一页再坐第二轮时 dayTotal 会把第一轮漏掉。
         committedTotal += seconds
+        // 收了这一坐，今日坐数才 +1。`start()` 读入时特意没把进行中的自己算进去。
+        dayRounds += 1
         return session
     }
 
