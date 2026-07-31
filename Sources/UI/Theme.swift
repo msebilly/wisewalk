@@ -138,3 +138,29 @@ extension Binding {
                 set: { if !$0 { source.wrappedValue = nil } })
     }
 }
+
+extension Binding where Value == Int {
+    /// 数量输入框绑这个，**不要绑 `value:` + `format: .number`**。
+    ///
+    /// `TextField(value:format:)` 会把 `0` 格式化成**字面的 "0" 填进框里**，
+    /// 那个 placeholder 于是一辈子不露面。用户点进去补 500 声，那个 0 还在：
+    ///
+    ///     光标落在它后面 → "0500" → 500，侥幸对了
+    ///     光标落在它前面 → "5000" → **5000，十倍**
+    ///
+    /// 实测就是十倍。老居士补记昨天的 500 声，一眼没看清点了「好」，
+    /// 昨天凭空多出 4500 声。**方向是「多」，量级是十倍，一半概率撞上。**
+    ///
+    /// 撑爆 `Int` 时保住上一个有效值：让用户看见「输不进去」，
+    /// 好过悄悄归零之后他没发现，按着 0 记了一笔。
+    var numericText: Binding<String> {
+        Binding<String>(
+            get: { wrappedValue == 0 ? "" : String(wrappedValue) },
+            set: { 新值 in
+                let 数字 = 新值.filter(\.isNumber)
+                if 数字.isEmpty { wrappedValue = 0 }
+                else if let n = Int(数字) { wrappedValue = n }
+            }
+        )
+    }
+}

@@ -123,7 +123,7 @@ struct ManualEntryView: View {
                 HStack {
                     Text("数量")
                     Spacer()
-                    TextField("0", value: $vm.amount, format: .number)
+                    TextField("0", text: $vm.amount.numericText)
                         .keyboardType(.numberPad)
                         .multilineTextAlignment(.trailing)
                         .font(.body.monospacedDigit())
@@ -263,7 +263,7 @@ struct MigrationSheet: View {
                     HStack {
                         Text("以往累计")
                         Spacer()
-                        TextField("0", value: $vm.amount, format: .number)
+                        TextField("0", text: $vm.amount.numericText)
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.trailing)
                             .font(.body.monospacedDigit())

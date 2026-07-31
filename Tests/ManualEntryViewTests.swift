@@ -143,3 +143,40 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     let neg = try env.ledger.revoke(s, at: now)
     #expect(EntryRow.amountText(neg, item: item) == "取消", "撤销那笔不许还说「已完成」")
 }
+
+@MainActor
+@Test func 数量框里的零必须是空框而不是字面的零() {
+    // ⛔ 这条是**手点模拟器点出来的**，当时 364 条全绿。
+    //
+    // 补记页原本写的是 `TextField("0", value: $vm.amount, format: .number)`。
+    // `amount` 是 `Int`，初值 0 —— `format: .number` 会把它格式化成
+    // **字面的 "0" 填进输入框**，那个 placeholder 于是一辈子不露面。
+    //
+    // 用户点进去补 500 声，框里那个 0 还在：
+    //   光标落在它后面 → "0500" → 500，侥幸对了
+    //   光标落在它前面 → "5000" → **5000，十倍**
+    //
+    // 实测就是十倍：输入 500，弹窗回「记上了 +5000 声」。
+    // 老居士补记昨天的 500 声，一眼没看清点了「好」，昨天凭空多出 4500 声。
+    // **方向是「多」，量级是十倍，而且一半概率撞上。**
+    //
+    // 「一声都不能多」在这里不是被算错破掉的，是被一个**没清空的输入框**破掉的。
+    var 值 = 0
+    let 绑 = Binding(get: { 值 }, set: { 值 = $0 })
+
+    #expect(绑.numericText.wrappedValue == "",
+            "0 必须显示成空框：只要框里留着字面的 0，用户输的数就会拼在它身上")
+
+    绑.numericText.wrappedValue = "500"
+    #expect(值 == 500, "输 500 就得是 500，不是 5000 也不是 0500")
+    #expect(绑.numericText.wrappedValue == "500", "非零照常显示")
+
+    绑.numericText.wrappedValue = ""
+    #expect(值 == 0, "清空即 0")
+
+    绑.numericText.wrappedValue = "1a2b3"
+    #expect(值 == 123, "numberPad 之外的来路（粘贴、外接键盘）也只收数字")
+
+    绑.numericText.wrappedValue = "99999999999999999999"
+    #expect(值 == 123, "撑爆 Int 时保住上一个有效值，不许悄悄归零")
+}
