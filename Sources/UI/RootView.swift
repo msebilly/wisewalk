@@ -52,7 +52,10 @@ struct RootView: View {
                 // 弹窗挂在外层的 NavigationStack 上——加在被禁用的子树里，
                 // 连「记上」按钮都会点不动。
                 .disabled(!Self.isReady(recovery))
-                .navigationDestination(for: Route.self) { destination($0) }
+                // 底色挂在栈**内部**每一页上，不能只挂在栈外的 `.themed()` 里——
+                // `NavigationStack` 自己那层不透明系统底会把它整个盖住。详见 `PageBackground`。
+                .pageBackground()
+                .navigationDestination(for: Route.self) { destination($0).pageBackground() }
         }
         .themed()
         .task { runRecovery() }

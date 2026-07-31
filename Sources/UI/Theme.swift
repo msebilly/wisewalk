@@ -77,6 +77,9 @@ extension EnvironmentValues {
 }
 
 /// 挂在根视图上，随系统深浅色切换自动换板。
+///
+/// ⚠️ **这里只管环境与 tint，不管底色。** 底色要用 `.pageBackground()` 挂在
+/// `NavigationStack` **内部**的每一页上，理由见 `PageBackground`。
 struct ThemedBackground: ViewModifier {
     @Environment(\.colorScheme) private var scheme
 
@@ -89,6 +92,33 @@ struct ThemedBackground: ViewModifier {
     }
 }
 
+/// 页面底色。**必须挂在 `NavigationStack` 内部的每一页上。**
+///
+/// `NavigationStack` 自己画一层不透明的系统底（浅色纯白 `#FFFFFF`、深色纯黑
+/// `#000000`）。`ThemedBackground` 挂在栈**外面**，它那句
+/// `.background(theme.background)` 整个被盖住——**那行是死代码，一像素都没画出来过**。
+/// 2026-07-31 跑 Step 12 端到端验证时截图采样才发现：
+/// 浅色实测 `#FFFFFF`（色板写的是 `#FAF7F0`）、深色实测 `#000000`（色板写的是 `#17140F`）。
+///
+/// **要紧的不是好不好看，是 `Palette.audited` 那 11 条对比度断言审的是一个
+/// 用户从没见过的底色。** 一条测试审的东西不在屏幕上，它就不是它名字说的那件事。
+///
+/// 方向上是安全的那一侧（纯白比暖纸更亮、纯黑比暖深底更暗，前景对比度只会更高，
+/// 不会更低），所以这不是无障碍回归；但审计与实景对不上这件事本身必须修。
+///
+/// `.scrollContentBackground(.hidden)` 是给 `List` / `Form` 用的——`ScrollView`
+/// 本身透明，不加也行，加上是为了将来某页换成 `List` 时不必再想起这件事。
+struct PageBackground: ViewModifier {
+    @Environment(\.theme) private var theme
+
+    func body(content: Content) -> some View {
+        content
+            .scrollContentBackground(.hidden)
+            .background(theme.background.ignoresSafeArea())
+    }
+}
+
 extension View {
     func themed() -> some View { modifier(ThemedBackground()) }
+    func pageBackground() -> some View { modifier(PageBackground()) }
 }
