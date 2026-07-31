@@ -8,6 +8,17 @@ struct RootView: View {
     @State private var recovery: RecoveryCoordinator
     @State private var today: TodayViewModel
     @State private var failure: String?
+    /// 恢复弹窗的开关**必须是可写的 `@State`，不能是 `.constant(!pending.isEmpty)`**。
+    ///
+    /// SwiftUI 关掉 alert 时会把 `false` 写回这个 binding。只读 binding 把这次写入
+    /// 丢掉，binding 于是永远说「还开着」而 alert 已经拆了——遮罩留在屏上、
+    /// `.disabled(!isReady)` 永不解除，**整个今日页再也点不动**。
+    /// 触发它只需要点一下 SwiftUI 自动补的那个 `Cancel`（见 `postpone()`）。
+    ///
+    /// 换成 `@State` 之后，「谁来开、谁来关」由 `syncRecoveryPrompt()` 一处说了算，
+    /// 它读的还是 `pending` —— 于是 `accept()` 抛错、pending 故意留着的那条路
+    /// （`查不到功课时记上要报错而不是悄悄什么都不做`）也能把弹窗**重新**支起来。
+    @State private var showRecovery = false
 
     init(env: AppEnvironment) {
         self.env = env
@@ -60,14 +71,18 @@ struct RootView: View {
         .themed()
         .task { runRecovery() }
         // 待裁决的草稿逐个问。一次问一份，问得清楚，也免得用户为了关掉弹窗胡乱点。
-        .alert("有一笔没记上", isPresented: .constant(!recovery.pending.isEmpty)) {
+        // 三个按钮一个都不能少：**只写两个的话 SwiftUI 会自己补第三个**，
+        // 标题是系统英文 `Cancel`、action 是空的，点下去就把界面锁死（见 `postpone()`）。
+        .alert("有一笔没记上", isPresented: $showRecovery) {
             Button("记上") { accept() }
             Button("不记了", role: .destructive) { discard() }
+            Button("以后再说", role: .cancel) { recovery.postpone() }
         } message: {
             Text(recovery.pending.first.map { Self.recoveryMessage($0) } ?? "")
         }
         .alert("出了点问题", isPresented: .presenting($failure)) {
-            Button("知道了") { failure = nil }
+            // 先把话说完，再把没裁决完的那些重新支起来——两个 alert 不抢同一块屏。
+            Button("知道了") { failure = nil; syncRecoveryPrompt() }
         } message: { Text(failure ?? "") }
     }
 
@@ -119,7 +134,15 @@ struct RootView: View {
         do {
             try recovery.runAtLaunch()
             try today.reload(dayStartHour: env.settings.dayStartHour)
+            syncRecoveryPrompt()
         } catch { failure = error.localizedDescription }
+    }
+
+    /// 弹窗开关只在这一处拨。读的是 `pending`，所以三种收场各归各位：
+    /// 还剩一份就接着问（两份草稿一份一份来）、问完了就放行、
+    /// `accept()` 抛错留着的那份会被**重新**支起来。
+    private func syncRecoveryPrompt() {
+        showRecovery = !recovery.pending.isEmpty
     }
 
     private func accept() {
@@ -127,7 +150,11 @@ struct RootView: View {
         do {
             try recovery.accept(first)
             try today.reload(dayStartHour: env.settings.dayStartHour)
-        } catch { failure = error.localizedDescription }
+            syncRecoveryPrompt()
+        } catch {
+            // 出错先说话；恢复弹窗等用户点完「知道了」再重新支起来。
+            failure = error.localizedDescription
+        }
     }
 
     private func discard() {
@@ -135,6 +162,7 @@ struct RootView: View {
         do {
             try recovery.discard(first)
             try today.reload(dayStartHour: env.settings.dayStartHour)
+            syncRecoveryPrompt()
         } catch { failure = error.localizedDescription }
     }
 

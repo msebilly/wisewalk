@@ -273,3 +273,40 @@ private func makeRecovery() throws -> (RecoveryCoordinator, AppEnvironment, Prac
     #expect(try env.drafts.pendingDrafts().isEmpty, "作废的草稿要清掉，不能每次启动都来一遍")
     #expect(try env.ledger.total(on: DayKey.today(), itemID: item.id) == 0, "一个字也不该记")
 }
+
+@MainActor
+@Test func 推迟裁决不动草稿下次启动还问得出来() throws {
+    // ⛔ 这条测试是**手点模拟器点出来的**，当时 363 条全绿。
+    //
+    // 恢复弹窗只写了「记上」和「不记了」两个按钮，两个都不是 `.cancel` 角色。
+    // **SwiftUI 于是自作主张补了第三个**，标题还是系统英文 `Cancel`——
+    // 而它的 action 是空的：不改 `pending`，也不动草稿。
+    //
+    // 那个 alert 的 `isPresented` 当时绑的是 `.constant(!pending.isEmpty)`。
+    // SwiftUI 关闭 alert 时会把 `false` 写回 binding，`.constant` 把这次写入丢掉，
+    // 于是 binding 永远说「还开着」而 alert 已经拆了——**状态机从此错位**：
+    // 遮罩留在屏上，`.disabled(!isReady)` 永不解除，
+    // **整个今日页再也点不动，只能杀掉 App**。那 10 声还躺在草稿里。
+    //
+    // 光把英文 `Cancel` 换成中文治不了病：只要第三条路的 action 什么都不改，
+    // 死锁照旧。**第三条路必须真的改变状态**——这就是 `postpone()`。
+    //
+    // 它要同时满足两件相反的事：
+    //   ① `pending` 清空 → binding 落回 false → 遮罩散掉、界面放行（治死锁）
+    //   ② 草稿**一个字节都不许动** → 下次启动照旧问得出来（治「丢」）
+    let (rc, env, item) = try makeRecovery()
+    let now = Date()
+    let draft = try env.drafts.begin(itemID: item.id, source: .counter, at: now)
+    try env.drafts.update(draft, amount: 108, at: now)
+    try rc.runAtLaunch()
+    #expect(rc.pending.count == 1, "前提：这一份本该问")
+
+    rc.postpone()
+
+    #expect(rc.pending.isEmpty, "推迟后 pending 必须清空，否则遮罩不散、界面永远点不动")
+    #expect(try env.drafts.pendingDrafts().count == 1, "推迟不是丢弃：草稿必须原封不动")
+    let 再 = RecoveryCoordinator(env: env)
+    try 再.runAtLaunch()
+    #expect(再.pending.count == 1, "下次启动必须还问得出来——推迟一笔不等于丢一笔")
+    #expect(再.pending.first?.suggestedAmount == 108, "连数目都不许变")
+}

@@ -195,6 +195,29 @@ final class RecoveryCoordinator {
         pending.removeAll { $0.id == item.id }
     }
 
+    /// 把这一轮的问话整个推迟到下次启动——**一份草稿都不动**。
+    ///
+    /// 存在的理由不体面：SwiftUI 的 `.alert` 只要没有 `.cancel` 角色的按钮，
+    /// 就会自作主张补一个，标题用系统语言（我们这儿显示成英文 `Cancel`），
+    /// 而它的 action 是空的。空 action 配上只读的 `isPresented` binding，
+    /// 会让 alert 的状态机永久错位，**整个界面卡死**（见
+    /// `推迟裁决不动草稿下次启动还问得出来`）。这条路关不掉，只能接管。
+    ///
+    /// 既然关不掉，就让它做一件**能自圆其说**的事：
+    /// 清 `pending` 是为了让界面放行，草稿留着是为了那些声数一声不丢。
+    /// 下次启动 `runAtLaunch()` 照旧把它们捞出来再问一遍。
+    ///
+    /// 代价说清楚：用户推迟之后可能自己手动补记一遍，下次启动又被问同一份。
+    /// 那时他该点「不记了」。**这个代价换的是「界面不死」，比它大得多的是
+    /// 眼下这条——界面死了，那笔草稿他一辈子也裁决不了。**
+    ///
+    /// 不许在这里删草稿：删了就是替用户做了「不记了」的决定，
+    /// 而他按的那个按钮上写的是「以后再说」。
+    func postpone() {
+        pending.removeAll()
+        drafts.removeAll()
+    }
+
     private func text(_ amount: Int, item: PracticeItem) -> String {
         switch item.measureType {
         case .duration: DurationFormat.spoken(amount)
