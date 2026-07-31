@@ -14,6 +14,7 @@ final class AppSettings {
         static let sound = "settings.soundEnabled"
         static let haptic = "settings.hapticEnabled"
         static let qing = "settings.qingEnabled"
+        static let qingLockScreenNoticed = "settings.qingLockScreenNoticed"
         static let dayStartHour = "settings.dayStartHour"
     }
 
@@ -29,12 +30,14 @@ final class AppSettings {
         _soundEnabled = defaults.bool(forKey: Key.sound)
         _hapticEnabled = defaults.bool(forKey: Key.haptic)
         _qingEnabled = defaults.bool(forKey: Key.qing)
+        _qingLockScreenNoticed = defaults.bool(forKey: Key.qingLockScreenNoticed)
         _dayStartHour = Self.clampHour(defaults.integer(forKey: Key.dayStartHour))
     }
 
     private var _soundEnabled: Bool
     private var _hapticEnabled: Bool
     private var _qingEnabled: Bool
+    private var _qingLockScreenNoticed: Bool
     private var _dayStartHour: Int
 
     var soundEnabled: Bool {
@@ -63,6 +66,21 @@ final class AppSettings {
     var qingEnabled: Bool {
         get { _qingEnabled }
         set { _qingEnabled = newValue; defaults.set(newValue, forKey: Key.qing) }
+    }
+
+    /// 「没给通知权限，锁屏时不会响」这句话是否已经对用户说过。
+    ///
+    /// **默认 false，说过一次就落盘。** 这一句必须说（不吭声的降级会让他以为
+    /// 倒计时在替他守着），但只该说一次：拒绝之后每坐一次弹一遍，用户会学会
+    /// 闭着眼点掉，那时连真正要紧的话也一并被点掉了。
+    ///
+    /// ⚠️ 这是**唯一**一个不该出现在设置页上的键——它不是偏好，是「说过没有」的备忘。
+    var qingLockScreenNoticed: Bool {
+        get { _qingLockScreenNoticed }
+        set {
+            _qingLockScreenNoticed = newValue
+            defaults.set(newValue, forKey: Key.qingLockScreenNoticed)
+        }
     }
 
     /// 一日从几点算起。允许推后几小时，为的是夜里十一点做完晚课的人——

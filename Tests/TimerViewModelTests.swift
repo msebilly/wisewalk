@@ -429,7 +429,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int, _ s: Int = 0) -> D
     vm.setCountdown(1800)
     try vm.start(at: start, timeZone: 北京时间)
 
-    #expect(throws: TimerViewModelError.self) {
+    #expect(throws: TimerViewModelError.implausibleDuration(seconds: 28800)) {
         _ = try vm.finish(at: start.addingTimeInterval(8 * 3600))
     }
     #expect(try 库里一条流水都没有(ctx), "拦住了就一秒都不许落账")

@@ -32,7 +32,7 @@ private func 干净的偏好() -> UserDefaults {
 }
 
 @MainActor
-@Test func 三个设置都能跨实例持久() {
+@Test func 音效震动与一日起始都能跨实例持久() {
     // **三个都得验。** 从前只验了 soundEnabled，于是另外两个的 setter
     // 若忘了那句 `defaults.set(...)`，全卷没有一条测试会红：
     // 底下 `一日起始…` 与 `音效与震动互不影响` 读的都是同一个实例的内存。
@@ -55,6 +55,34 @@ private func 干净的偏好() -> UserDefaults {
     #expect(!重启后.soundEnabled, "重启后音效设置丢了")
     #expect(重启后.hapticEnabled, "重启后震动设置丢了，或者它读的是音效那个键")
     #expect(重启后.dayStartHour == 4, "重启后一日起始丢了，晚课会记到第二天")
+}
+
+@MainActor
+@Test func 四个布尔开关都能跨实例持久且互不串键() {
+    // 四个：sound / haptic / qing / qingLockScreenNoticed。
+    //
+    // **每个都要两个方向都验。** 只验一个方向的话，「setter 根本没落盘」或
+    // 「getter 读了别人的键」的实现，只要那个值碰巧与默认值相同就照样绿——
+    // 上面那条测试里 haptic 恒为 true（与默认同值），验的其实只有「没串到 sound 的键」。
+    //
+    // 这个洞是真出过的：Task 16.5 加 `qingEnabled` 时**一条测试都没加**，
+    // 它的 setter 若漏了那句 `defaults.set(...)`，全卷没有一条会红。
+    for (音效, 震动, 引磬, 说过) in [(false, true, false, true), (true, false, true, false)] {
+        let d = 干净的偏好()
+        let 头一回 = AppSettings(defaults: d)
+        头一回.soundEnabled = 音效
+        头一回.hapticEnabled = 震动
+        头一回.qingEnabled = 引磬
+        头一回.qingLockScreenNoticed = 说过
+
+        let 重启后 = AppSettings(defaults: d)
+        #expect(重启后.soundEnabled == 音效)
+        #expect(重启后.hapticEnabled == 震动)
+        #expect(重启后.qingEnabled == 引磬, "引磬开关没落盘，或读了别人的键")
+        // 这个键丢了，用户每坐一次就被告知一次「锁屏时不会响」，
+        // 很快就学会闭着眼点掉——那时连真正要紧的话也一并被点掉了。
+        #expect(重启后.qingLockScreenNoticed == 说过, "「说过没有」没落盘")
+    }
 }
 
 @MainActor

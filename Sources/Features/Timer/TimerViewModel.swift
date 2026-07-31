@@ -244,7 +244,13 @@ final class TimerViewModel {
             // 一个字段都不动、草稿原样留着。用户接下来可能填一个数走
             // `record(seconds:)`，也可能直接 `abandon()`；就算 App 这时候死了，
             // 草稿还在盘上，下次启动 `RecoveryCoordinator` 照样问得出来。
-            throw TimerViewModelError.implausibleDuration(seconds: elapsed)
+            //
+            // 带出去的是 `rawElapsed` 不是 `elapsed`：这个数唯一的去处是纠正表那句
+            // 「计时器上是 X，多半是忘了按结束」，它得**照实说**。倒计时模式下
+            // `elapsed` 已被封顶，说出来就成了「计时器上是 30 分钟，多半是忘了按结束」
+            // ——30 分钟是个再正常不过的一坐，用户读完只会顺手拨 30 分钟，
+            // 于是记上一个从未发生的 30 分钟。那正是这道闸要拦的东西。
+            throw TimerViewModelError.implausibleDuration(seconds: rawElapsed)
         }
 
         return try commitAndClear(draft, seconds: elapsed, at: now)

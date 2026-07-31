@@ -36,6 +36,10 @@ struct TimerView: View {
     @State private var customMinutes = 30
     /// 前台到零响引磬的播放器。**必须持有**：局部变量会在闭包结束时释放，声音随之截断。
     @State private var qingPlayer: AVAudioPlayer?
+    /// 本页是否已经问过通知权限。问过就不再问——被拒之后每选一档弹一次是骚扰。
+    @State private var qingAuthorizationAsked = false
+    /// 通知权限被拒，正在告诉用户「锁屏时不会响」。
+    @State private var lockScreenSilent = false
 
     /// 短于这个数的一坐，返回时要问一句。
     ///
@@ -115,6 +119,12 @@ struct TimerView: View {
         .alert("出了点问题", isPresented: .constant(failure != nil)) {
             Button("知道了") { failure = nil }
         } message: { Text(failure ?? "") }
+        // 降级要说出来。不吭声的降级会让他以为倒计时在替他守着。
+        .alert("锁屏时不会响", isPresented: $lockScreenSilent) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text("没给通知权限，引磬只在 App 开着、屏幕亮着的时候响。走时和记录不受影响，一秒都不会少。想让它锁屏也响，到「设置 › 通知 › 慧行」里打开。")
+        }
     }
 
     /// 走时与今日进度，起坐后显示。
@@ -138,6 +148,7 @@ struct TimerView: View {
                 ForEach(TimerViewModel.countdownChoices, id: \.self) { seconds in
                     choiceRow(choiceLabel(seconds), selected: chosenCountdown == seconds) {
                         chosenCountdown = seconds
+                        ensureQingAuthorization()
                     }
                 }
                 choiceRow("不限时", selected: chosenCountdown == nil) {
@@ -277,6 +288,7 @@ struct TimerView: View {
                     Button("确定") {
                         chosenCountdown = DurationField.seconds(hours: customHours, minutes: customMinutes)
                         choosingCustom = false
+                        ensureQingAuthorization()
                     }
                     .disabled(!customIsValid)
                 }
@@ -344,6 +356,31 @@ struct TimerView: View {
                                                      unit: vm.item.unit, measureType: vm.item.measureType)
         guard vm.dayRounds > 0 else { return progress }
         return "\(progress) · 今日 \(vm.dayRounds) 坐"
+    }
+
+    /// 通知权限延后到**用户第一次真的设倒计时**这一刻才要。§6.3.1 定案二。
+    ///
+    /// 不在启动时问：从不用倒计时的人不该为一个他不用的功能被弹窗打扰，
+    /// 而在他要用的那一刻问，他也才知道这个权限是干什么的。
+    ///
+    /// 被拒绝就**当场**告诉他锁屏时不会响——不能让他锁屏坐完一坐、
+    /// 下坐才发现引磬没响。降级本身不是问题，**不吭声的降级才是**：
+    /// 他会以为自己设的倒计时在替他守着。
+    ///
+    /// 问过一次就不再问：拒绝之后每选一档弹一次是骚扰，而系统那边也只会给
+    /// 第一次真弹窗，之后 `requestAuthorization` 直接返回存着的那个答案。
+    ///
+    /// 「锁屏时不会响」这句话**落盘记一次说过没有**，而不是靠这个 `@State`：
+    /// 页面每次进来都是新的，只靠它等于每坐一次弹一遍。
+    private func ensureQingAuthorization() {
+        guard !qingAuthorizationAsked else { return }
+        qingAuthorizationAsked = true
+        Task {
+            guard await QingScheduler.requestAuthorization() == false else { return }
+            guard !settings.qingLockScreenNoticed else { return }
+            settings.qingLockScreenNoticed = true
+            lockScreenSilent = true
+        }
     }
 
     /// 返回。不足一分钟先问一句，够长的直接记。
