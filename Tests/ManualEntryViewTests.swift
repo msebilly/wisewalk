@@ -121,3 +121,25 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     }
     #expect(Set(期望.values).count == 期望.count, "两个来源不许共用一个说法，那等于没说")
 }
+
+@MainActor
+@Test func 打卡类的说法在撤销那笔上是取消而不是已完成() throws {
+    // 交付 Task 17 的实现者自己报了这个空洞：`amountText` 的 `.check` 分支
+    // （「已完成」/「取消」）当时零覆盖，测试里只造过计数类和计时类。
+    //
+    // 把那一行的三元判断写反，屏幕就会把撤销那笔说成「已完成」、把原记录说成
+    // 「取消」——**一天的实情在修正页上被整个说反了**，而用户正是到这儿来核对的。
+    // 与「时刻按存下来的时区说」是同一族：账没错，说谎的是屏幕。
+    let env = try AppEnvironment(container: ModelContainerFactory.inMemory(),
+                                 defaults: UserDefaults(suiteName: "test.\(UUID().uuidString)")!)
+    let item = try env.items.create(name: "早课", measureType: .check, unit: "",
+                                    dailyGoal: nil, iconName: "checkmark.circle",
+                                    colorHex: Palette.Light.fulfilled)
+    let now = Date()
+    let s = try env.ledger.record(item: item, amount: 1, source: .manual,
+                                  startedAt: now, at: now)
+    #expect(EntryRow.amountText(s, item: item) == "已完成")
+
+    let neg = try env.ledger.revoke(s, at: now)
+    #expect(EntryRow.amountText(neg, item: item) == "取消", "撤销那笔不许还说「已完成」")
+}

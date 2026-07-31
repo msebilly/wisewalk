@@ -77,6 +77,8 @@ struct ManualEntryView: View {
         .navigationTitle("补记")
         .navigationBarTitleDisplayMode(.inline)
         .task { load() }
+        .onChange(of: hours) { _, _ in syncDial() }
+        .onChange(of: minutes) { _, _ in syncDial() }
         .alert("出了点问题", isPresented: .constant(failure != nil)) {
             Button("知道了") { failure = nil }
         } message: { Text(failure ?? "") }
@@ -95,7 +97,13 @@ struct ManualEntryView: View {
                     Text(item.name).tag(Optional(item))
                 }
             }
-            .onChange(of: vm.selectedItem?.id) { _, _ in refreshEntries() }
+            .onChange(of: vm.selectedItem?.id) { _, _ in
+                // 换了功课就把输入清空。留着上一门课的数**等于替用户编一个数**：
+                // 刚在「打坐」转盘上拨到 30 分（`vm.amount` = 1800），一改选「念佛」，
+                // 数量框里赫然是 1800，顺手一点「记上」就是 1800 声。
+                resetInput()
+                refreshEntries()
+            }
 
             DatePicker("日期", selection: $pickedDate,
                        in: ...Date(), displayedComponents: .date)
@@ -173,9 +181,28 @@ struct ManualEntryView: View {
         }
     }
 
-    private var canSubmit: Bool {
-        if isDuration { vm.amount = DurationField.seconds(hours: hours, minutes: minutes) }
-        return vm.canSubmit()
+    /// ⛔ **这里从前带一句 `if isDuration { vm.amount = … }`。**
+    ///
+    /// 它是被 `.disabled(!canSubmit)` 在 `body` 求值途中调用的，而 `vm.canSubmit()`
+    /// 经 `validate` 又读 `vm.amount`——同一趟 `body` 里对一个 `@Observable`
+    /// 属性既读又写。`@Observable` 生成的 setter 不比较新旧值，写进去就发通知，
+    /// 于是写 → 失效 → 重绘 → 再写。**计时类功课（打坐）一被选中，补记页就卡在
+    /// 重绘里出不来**，而视图层一条测试都覆盖不到它。
+    ///
+    /// 转盘的值改由 `body` 上那两个 `.onChange` 推进去，与 `pickedDate` 同一个写法。
+    private var canSubmit: Bool { vm.canSubmit() }
+
+    /// 转盘 → `vm.amount`。只有计时类用得上；计数类的数量直接绑在 `$vm.amount` 上。
+    private func syncDial() {
+        guard isDuration else { return }
+        vm.amount = DurationField.seconds(hours: hours, minutes: minutes)
+    }
+
+    /// 清空这张表单上用户填的数，不动选中的功课和日期。
+    private func resetInput() {
+        vm.amount = 0
+        hours = 0
+        minutes = 0
     }
 
     private func load() {
@@ -194,7 +221,7 @@ struct ManualEntryView: View {
     }
 
     private func submit() {
-        if isDuration { vm.amount = DurationField.seconds(hours: hours, minutes: minutes) }
+        syncDial()
         do {
             let s = try vm.submit()
             toast = EntryRow.amountText(s, item: vm.selectedItem)
@@ -248,8 +275,13 @@ struct MigrationSheet: View {
             }
             .navigationTitle("记入以往的累计")
             .navigationBarTitleDisplayMode(.inline)
+            // ⛔ 这张表和补记表单共用同一个 `vm.amount`，所以两头都得自己擦干净。
+            // 不擦的话：在这儿敲了 290000，想想不对又按「取消」，退回补记页——
+            // 数量框里就是 290000，再顺手一点「记上」，**今天凭空多出 29 万声**。
+            // 这是全卷方向最坏、量级最大的一处「多」，而它只是因为两张表共用一个数。
+            .onAppear { vm.amount = 0 }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { vm.amount = 0; dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("记上") { submit() }
                         .disabled(!vm.canSubmit())
