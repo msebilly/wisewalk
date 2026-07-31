@@ -249,6 +249,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int, _ s: Int = 0) -> D
     try vm.finish(at: 北京(7, 29, 0, 10))
 
     #expect(vm.dayTotal == 1800, "日子翻过去了，屏幕上的『今日』不该再带着昨天那一小时")
+    #expect(vm.dayRounds == 1, "坐数同理：29 号只坐了这一坐，副标题不许把 28 号早课那一坐算进来")
     #expect(try ledger.total(on: 20260728, itemID: item.id) == 3600)
     #expect(try ledger.total(on: 20260729, itemID: item.id) == 1800)
 }

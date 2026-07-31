@@ -242,6 +242,9 @@ final class TimerViewModel {
             // 且下次 `start()`（Task 16 回到前台就调）一次就补齐。
             committedDayKey = session.dayKey
             committedTotal = 0
+            // 坐数同理，而且更要紧：秒数报多了用户未必看得出，
+            // 「今日 2 坐」是一句他能读懂的假话——那第二坐是昨天坐的。
+            dayRounds = 0
         }
         // 已经入账，从「本次」挪到「今日已记」。
         // 不挪的话，同一页再坐第二轮时 dayTotal 会把第一轮漏掉。
