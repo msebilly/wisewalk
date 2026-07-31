@@ -32,6 +32,9 @@ final class ManualEntryViewModel {
     var amount: Int = 0
     var note: String = ""
 
+    /// 迁移表单借走这两个字段时存的原值。见 `beginMigration`。
+    private var borrowed: (item: PracticeItem?, amount: Int)?
+
     private let ledger: DayLedger
     private let items: PracticeItemStore
 
@@ -121,6 +124,35 @@ final class ManualEntryViewModel {
     /// **固定备注会盖掉用户自己写的 `note`**——这是有意的：这笔的备注是给程序看的
     /// 幂等/识别标记，不是给人看的文字。Task 17 的迁移表单不该出现备注输入框。
     @discardableResult
+    /// 迁移表单向补记表单**借**状态，这两个方法负责借与还。
+    ///
+    /// ⛔ 两张表单共用同一个 `self`，所以每一个可变字段都得进出各擦一次。
+    /// `amount` 那一处早发现了（在这儿敲了 290000 又按取消，退回去顺手一点「记上」，
+    /// 今天凭空多出 29 万声）；`selectedItem` 漏了，后果更难察觉——
+    /// 用户在补记页选好「念佛」，进迁移表单改选「持咒」，按取消退回来，
+    /// 选择器停在「持咒」上。他以为还在念佛那一栏，一点「记上」，
+    /// **这笔就记到持咒头上**。数字没错、天数没错，错的是记在谁名下，
+    /// 而圆满是按每门课各自算的。
+    ///
+    /// **收在这里而不是写进 `MigrationSheet` 的 `onAppear` / 「取消」闭包**：
+    /// 那是两处，两处就得说两遍，本卷有八次实测说明早晚有一处说错。
+    /// 而且写在 View 里就测不到——视图层零覆盖正是这八次的共同形状。
+    func beginMigration() {
+        borrowed = (selectedItem, amount)
+        amount = 0
+    }
+
+    /// 还回借走的两个字段。**成功提交后也要调**——提交完照样得把补记表单
+    /// 还原成用户离开时的样子，否则「记上」和「取消」两条路会分家，
+    /// 而分家的那条早晚被漏掉。
+    func endMigration() {
+        if let borrowed {
+            selectedItem = borrowed.item
+            amount = borrowed.amount
+        }
+        borrowed = nil
+    }
+
     func submitMigrationTotal(
         at now: Date = Date(),
         timeZone: TimeZone = .current

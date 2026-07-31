@@ -114,12 +114,21 @@ final class ItemEditorViewModel {
 
     /// 套用模板。只带出名称、量法、量词与图标，**不带目标值**——
     /// 九款竞品无一预设数字，且预设与「随分随力」相违。
+    ///
+    /// ⚠️ **`dailyGoal = nil` 必须自己写一句，不能指望 `measureType` 的 `didSet`。**
+    /// 那个 `didSet` 头一句是 `guard measureType != oldValue else { return }`：
+    /// 用户先把目标填成 1080（他心里想的是念佛），再选「持咒」这个同为 `.count`
+    /// 的模板——量法没变，`didSet` 早返回，**1080 原样留着**。存下去之后，
+    /// 持咒这门课的圆满分母是一个他从没为它选过的数。
+    ///
+    /// 圆满是这个 App 唯一一处替用户下的判断，判据必须是他自己给的数。
     func apply(template: PracticeTemplate) {
         name = template.name
         measureType = template.measureType
         unit = template.unit
         iconName = template.iconName
         templateKey = template.key
+        dailyGoal = nil
     }
 
     var canSave: Bool { !trimmedName.isEmpty }

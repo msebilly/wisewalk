@@ -79,10 +79,10 @@ struct ManualEntryView: View {
         .task { load() }
         .onChange(of: hours) { _, _ in syncDial() }
         .onChange(of: minutes) { _, _ in syncDial() }
-        .alert("出了点问题", isPresented: .constant(failure != nil)) {
+        .alert("出了点问题", isPresented: .presenting($failure)) {
             Button("知道了") { failure = nil }
         } message: { Text(failure ?? "") }
-        .alert("记上了", isPresented: .constant(toast != nil)) {
+        .alert("记上了", isPresented: .presenting($toast)) {
             Button("好") { toast = nil }
         } message: { Text(toast ?? "") }
         .sheet(isPresented: $showMigration) {
@@ -275,19 +275,20 @@ struct MigrationSheet: View {
             }
             .navigationTitle("记入以往的累计")
             .navigationBarTitleDisplayMode(.inline)
-            // ⛔ 这张表和补记表单共用同一个 `vm.amount`，所以两头都得自己擦干净。
-            // 不擦的话：在这儿敲了 290000，想想不对又按「取消」，退回补记页——
-            // 数量框里就是 290000，再顺手一点「记上」，**今天凭空多出 29 万声**。
-            // 这是全卷方向最坏、量级最大的一处「多」，而它只是因为两张表共用一个数。
-            .onAppear { vm.amount = 0 }
+            // ⛔ 这张表和补记表单共用同一个 `vm`，**每个可变字段都得进出各擦一次**。
+            // 借还收在 `beginMigration()` / `endMigration()` 里，不散在这几个闭包上——
+            // 散着写就得说好几遍，而第一版正是这么写的，于是擦了 `amount`、
+            // 漏了 `selectedItem`：用户在补记页选好「念佛」，进来改选「持咒」再按取消，
+            // 退回去选择器停在「持咒」，一点「记上」这笔就记到持咒头上。
+            .onAppear { vm.beginMigration() }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { vm.amount = 0; dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { vm.endMigration(); dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("记上") { submit() }
                         .disabled(!vm.canSubmit())
                 }
             }
-            .alert("出了点问题", isPresented: .constant(failure != nil)) {
+            .alert("出了点问题", isPresented: .presenting($failure)) {
                 Button("知道了") { failure = nil }
             } message: { Text(failure ?? "") }
         }
@@ -297,7 +298,8 @@ struct MigrationSheet: View {
     private func submit() {
         do {
             _ = try vm.submitMigrationTotal()
-            vm.amount = 0
+            // 成功也要还——「记上」和「取消」两条路必须走同一句，分家的那条早晚被漏掉。
+            vm.endMigration()
             onDone()
             dismiss()
         } catch { failure = error.localizedDescription }

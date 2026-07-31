@@ -293,3 +293,26 @@ private func makeEditorEnv() throws -> (PracticeItemStore, DayLedger) {
     #expect(vm.dailyGoal == nil, "就算硬塞进来也不许留下")
     #expect(try vm.save().dailyGoal == nil, "更不许落库")
 }
+
+@MainActor
+@Test func 套用同量法的模板也要把目标值清掉() throws {
+    // `apply(template:)` 的注释白纸黑字写着「**不带目标值**——九款竞品无一预设数字，
+    // 且预设与「随分随力」相违」。可它靠 `measureType` 的 `didSet` 来清，而那个
+    // `didSet` 头一句就是 `guard measureType != oldValue else { return }`。
+    //
+    // 于是：用户在新建页先把目标填成 1080（他心里想的是念佛），再点「模板」选「持咒」
+    // ——同为 `.count`，`didSet` 直接早返回，**1080 原样留着**。存下去之后，
+    // 持咒这门课的圆满分母是一个他从没为它选过的数。
+    //
+    // 圆满是这个 App 唯一一处替用户下的判断。判据必须是他自己给的数，
+    // 不能是上一次输入的残留。
+    let (items, _) = try makeEditorEnv()
+    let vm = ItemEditorViewModel(store: items)
+    vm.measureType = .count
+    vm.dailyGoal = 1080
+
+    // 「持咒」也是 .count，`measureType` 没变，`didSet` 因此不触发。
+    vm.apply(template: TemplateCatalog.template(key: "mantra")!)
+
+    #expect(vm.dailyGoal == nil, "套用模板一律不带目标值，量法变没变都一样")
+}

@@ -357,3 +357,48 @@ private func 库里一条流水都没有(_ ctx: ModelContext) throws -> Bool {
     vm.amount = 500
     #expect(!vm.canSubmit(at: 凌晨一点, timeZone: 北京时间))
 }
+
+// MARK: - 迁移表单借走的那两个字段
+
+@MainActor
+@Test func 迁移表单退出时把借走的两个字段都还回来() throws {
+    // ⛔ 纪律 ⑱ 的同一个形状，第二次犯：迁移表单和补记表单共用同一个 `vm`。
+    // `amount` 那一处早就发现并擦干净了，`selectedItem` 漏了。
+    //
+    // 漏的后果比 `amount` 那处更难察觉：用户在补记页选好「念佛」，打开迁移表单
+    // 改选「持咒」，想想不对按「取消」——退回补记页，功课选择器停在「持咒」上。
+    // 他以为还在念佛那一栏，一点「记上」，**这笔就记到持咒头上**。
+    // 数字没错、天数没错，错的是记在谁名下——而圆满是按每门课各自算的。
+    //
+    // 收进 ViewModel 而不是写在 `MigrationSheet` 的 `onAppear`/`取消` 里：
+    // 那是两处，两处就得说两遍，第 2 卷有八次实测说明早晚有一处说错。
+    let (vm, items, _, 念佛, _) = try makeManual()
+    let 持咒 = try items.create(name: "持咒", measureType: .count, unit: "遍",
+                              dailyGoal: nil, iconName: "circle",
+                              colorHex: Palette.Light.accent)
+    try vm.reloadItems()
+
+    vm.selectedItem = 念佛
+    vm.amount = 108
+
+    vm.beginMigration()
+    #expect(vm.amount == 0, "迁移表单不该带着补记页那个数进来")
+    vm.selectedItem = 持咒
+    vm.amount = 290000
+
+    vm.endMigration()
+    #expect(vm.selectedItem?.id == 念佛.id, "退出迁移表单必须还回补记页原来选的那门课")
+    #expect(vm.amount == 108, "两个字段一起借、一起还")
+}
+
+@MainActor
+@Test func 迁移表单进来时借的是当前那门课() throws {
+    // 借出去的是「当前选中的那门课」，不是 nil——用户多半就是要给这门课记以往累计，
+    // 进来还得自己再选一遍是白费手脚。
+    let (vm, _, _, 念佛, _) = try makeManual()
+    try vm.reloadItems()
+
+    vm.selectedItem = 念佛
+    vm.beginMigration()
+    #expect(vm.selectedItem?.id == 念佛.id)
+}

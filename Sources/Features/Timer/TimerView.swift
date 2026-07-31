@@ -116,7 +116,7 @@ struct TimerView: View {
                                     set: { if !$0 { implausibleReading = 0 } })) {
             correctionSheet
         }
-        .alert("出了点问题", isPresented: .constant(failure != nil)) {
+        .alert("出了点问题", isPresented: .presenting($failure)) {
             Button("知道了") { failure = nil }
         } message: { Text(failure ?? "") }
         // 降级要说出来。不吭声的降级会让他以为倒计时在替他守着。

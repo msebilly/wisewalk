@@ -31,7 +31,9 @@ guard:
 		exit 1; \
 	fi
 
-gen:
+# `gen` 也要挂 guard：直接跑 `make gen` 会绕过闸门，
+# 重新造出 2026-07-30 那次并发重写 WiseWalk.xcodeproj 的条件。
+gen: guard
 	xcodegen generate --quiet
 
 build: guard gen

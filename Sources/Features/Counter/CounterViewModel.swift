@@ -128,10 +128,20 @@ final class CounterViewModel {
     /// 没有草稿就**抛错**，不许静默返回。
     /// 静默返回时视图收不到任何信号，会照常给出「记上了」的音效与震动，
     /// 而这一下根本没记上——闭着眼睛数数的人永远发现不了。
+    ///
+    /// ⚠️ **先落盘，成功了才动 `count`。** 顺序反过来的话：`update` 抛错时视图弹
+    /// 「出了点问题」，用户按「知道了」接着数——下一下成功时草稿被写成**含那一下**
+    /// 的新值，那一下明明当场报了错，最终却进了账本。方向是「多」，
+    /// 而闭着眼睛数数的人永远发现不了。`start` 与 `finish` 守的是同一条规矩。
+    ///
+    /// ⛔ **这条没有红绿**：要让 `drafts.update` 抛错就得让 `context.save()` 抛错，
+    /// 而 SwiftData 里诱发它的手段本卷还没有（同「那九个写入口」小节第 4 条理由）。
+    /// 删草稿再写不行——实测 `save()` 照样成功。**改这里的时候没有网接着你。**
     private func add(_ delta: Int, at now: Date) throws {
         guard let draft else { throw CounterViewModelError.notCounting }
-        count = max(0, count + delta)
-        try drafts.update(draft, amount: count, at: now)
+        let next = max(0, count + delta)
+        try drafts.update(draft, amount: next, at: now)
+        count = next
     }
 
     /// 结束：写一笔流水并清掉草稿（同一次 save）。

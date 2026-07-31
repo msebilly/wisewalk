@@ -122,3 +122,19 @@ extension View {
     func themed() -> some View { modifier(ThemedBackground()) }
     func pageBackground() -> some View { modifier(PageBackground()) }
 }
+
+extension Binding {
+    /// `.alert(_:isPresented:)` 用的可写派生绑定：有值就弹，系统写回 `false` 时清成 `nil`。
+    ///
+    /// ⛔ **不要写 `.constant(x != nil)`。** SwiftUI 关闭 alert 时会往 `isPresented`
+    /// 写 `false`，而 `.constant` 把这次写入丢掉。只要有一条关闭路径不经过按钮闭包
+    /// （VoiceOver 的 escape 手势、系统主动收起、日后 SwiftUI 行为变化），
+    /// 底下那个 `failure` / `toast` 仍然非 nil，alert 立刻重新弹出来——
+    /// **用户被困在一个点不掉的弹窗里，退不出这一页。**
+    ///
+    /// 抽成一处是因为全卷有六个地方要写它。要说六遍的话，早晚有一处说错。
+    static func presenting<T>(_ source: Binding<T?>) -> Binding<Bool> where Value == Bool {
+        Binding(get: { source.wrappedValue != nil },
+                set: { if !$0 { source.wrappedValue = nil } })
+    }
+}

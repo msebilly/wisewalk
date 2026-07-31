@@ -59,9 +59,14 @@ enum QingScheduler {
         }
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: TimeInterval(seconds),
                                                         repeats: false)
+        // 排定失败必须留痕。吞掉的话：倒计时到点没有引磬，用户以为还没坐满，
+        // 又坐了一段——多出来的那段是这个 App 让他多坐的。
+        // 本卷没有日志设施，先 print；第 3 卷接诊断页时改成能看见的东西。
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: requestID, content: content, trigger: trigger)
-        )
+        ) { error in
+            if let error { print("QingScheduler.schedule 失败：\(error)") }
+        }
     }
 
     /// 撤掉已排的引磬。

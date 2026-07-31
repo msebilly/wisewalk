@@ -74,7 +74,7 @@ struct ItemListView: View {
             TemplatePickerSheet(store: store) { reload() }
         }
         .task { reload() }
-        .alert("出了点问题", isPresented: .constant(failure != nil)) {
+        .alert("出了点问题", isPresented: .presenting($failure)) {
             Button("知道了") { failure = nil }
         } message: { Text(failure ?? "") }
     }
@@ -164,7 +164,7 @@ struct TemplatePickerSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
             }
-            .alert("出了点问题", isPresented: .constant(failure != nil)) {
+            .alert("出了点问题", isPresented: .presenting($failure)) {
                 Button("知道了") { failure = nil }
             } message: { Text(failure ?? "") }
         }

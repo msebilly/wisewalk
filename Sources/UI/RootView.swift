@@ -66,7 +66,7 @@ struct RootView: View {
         } message: {
             Text(recovery.pending.first.map { Self.recoveryMessage($0) } ?? "")
         }
-        .alert("出了点问题", isPresented: .constant(failure != nil)) {
+        .alert("出了点问题", isPresented: .presenting($failure)) {
             Button("知道了") { failure = nil }
         } message: { Text(failure ?? "") }
     }

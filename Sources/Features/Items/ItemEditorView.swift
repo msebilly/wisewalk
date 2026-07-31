@@ -130,7 +130,7 @@ struct ItemEditorView: View {
         .onChange(of: vm.measureType) { _, _ in
             goalText = vm.goalDisplay.map(String.init) ?? ""
         }
-        .alert("出了点问题", isPresented: .constant(failure != nil)) {
+        .alert("出了点问题", isPresented: .presenting($failure)) {
             Button("知道了") { failure = nil }
         } message: { Text(failure ?? "") }
     }
