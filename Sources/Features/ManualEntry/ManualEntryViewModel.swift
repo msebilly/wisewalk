@@ -21,9 +21,12 @@ final class ManualEntryViewModel {
     /// §6.12 迁移：把纸本或别家 App 的历史累计一次性记成一笔时打的固定备注。
     /// 第 3 卷诊断页据此把它与日常流水区分开——否则「累计 30 万声」里
     /// 那笔 29 万的起始数会让日均统计毫无意义。
-    static let migrationNote = "migration:initial-total"
+    nonisolated static let migrationNote = "migration:initial-total"
 
     var selectedItem: PracticeItem?
+    /// 供选择的定课，按用户自己的排序。已归档的不在其中——
+    /// 归档的功课不该还能往里补记新账。
+    private(set) var pickerItems: [PracticeItem] = []
     var selectedDayKey: Int = 0
     /// 计数类为遍数，计时类为**秒**。
     var amount: Int = 0
@@ -35,6 +38,17 @@ final class ManualEntryViewModel {
     init(ledger: DayLedger, items: PracticeItemStore) {
         self.ledger = ledger
         self.items = items
+    }
+
+    /// 进页面与从定课管理返回时调用。
+    func reloadItems() throws {
+        pickerItems = try items.activeItems()
+        // 已选中的项还在就保持不变——用户选好了「持咒」，重载一下跳回「念佛」很恼人。
+        // 不在了（被归档）就落回第一项，否则会停在一个提交时静默失败的选择上。
+        if let current = selectedItem, pickerItems.contains(where: { $0.id == current.id }) {
+            return
+        }
+        selectedItem = pickerItems.first
     }
 
     /// 提交按钮亮不亮。
