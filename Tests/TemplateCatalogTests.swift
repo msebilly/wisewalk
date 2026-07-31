@@ -69,3 +69,20 @@ import UIKit
     #expect(TemplateCatalog.template(key: "chanting")?.name == "念佛")
     #expect(TemplateCatalog.template(key: "不存在的key") == nil)
 }
+
+@Test func 图标候选全是真存在的系统符号() {
+    // 名字写错不会报错，只会渲染成一片空白。上线前没人会逐个点开看。
+    for name in TemplateCatalog.iconChoices {
+        #expect(UIImage(systemName: name) != nil, "SF Symbol「\(name)」不存在")
+    }
+    for t in TemplateCatalog.all {
+        #expect(UIImage(systemName: t.iconName) != nil, "模板「\(t.name)」的图标不存在")
+    }
+}
+
+@Test func 颜色候选不重复且都解析得动() {
+    #expect(Set(TemplateCatalog.colorChoices).count == TemplateCatalog.colorChoices.count)
+    for hex in TemplateCatalog.colorChoices {
+        #expect(Contrast.channels(hex) != nil, "\(hex) 解析不了")
+    }
+}
