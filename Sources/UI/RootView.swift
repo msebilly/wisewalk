@@ -94,10 +94,24 @@ struct RootView: View {
             ItemListView(store: env.items, path: $path)
                 .onDisappear { reloadToday() }
         case .itemEditor(let id):
-            ItemEditorView(vm: ItemEditorViewModel(
-                store: env.items,
-                editing: id.flatMap { try? env.items.item(id: $0) }
-            ))
+            // ⛔ `id != nil` 却取不到项时，**绝不能**把 `editing` 传成 nil。
+            // `ItemEditorViewModel.save()` 见 `editing == nil` 就走 `store.create`——
+            // 用户点的是「编辑念佛」，按下保存却新建出**第二个念佛**。
+            // 从此今日页两门念佛，圆满的分母凭空翻倍，**那天再不可能圆满**，
+            // 而他完全看不出是为什么（与 Task 13「装配阶段又装一套内置定课」同罪）。
+            //
+            // `try?` 把 fetch 的抛错也吞成 nil，所以这条路不只在「项不存在」时才通。
+            // 本卷 `PracticeItem` 只归档不硬删、无同步，够得着的机会很小；
+            // 第 3 卷接 CloudKit 之后另一台设备的删除会让它变得寻常。
+            // 与 `.counter` / `.timer` 一样，取不到就什么都不渲染——空白页不好看，
+            // 但它不会往账本里写东西。
+            if let editing = id {
+                if let item = try? env.items.item(id: editing) {
+                    ItemEditorView(vm: ItemEditorViewModel(store: env.items, editing: item))
+                }
+            } else {
+                ItemEditorView(vm: ItemEditorViewModel(store: env.items, editing: nil))
+            }
         }
     }
 

@@ -185,9 +185,22 @@ struct TimerView: View {
                 vm.setCountdown(chosenCountdown)
                 do {
                     try vm.start(dayStartHour: settings.dayStartHour)
+                    // 按**剩余**排，不是按整段排。`start()` 会照单全收旧草稿
+                    // （杀进程后重开、挂起再回来都走这条路），此刻 `elapsed` 已经不是 0。
+                    // 按整段排的话：设 30 分钟、坐了 10 分钟被杀、重开接着坐，
+                    // 到零在 20 分钟后而引磬在 30 分钟后——**用户多坐了 10 分钟**，
+                    // 而让他多坐的正是这个 App。
+                    //
+                    // 账本不受影响（§6.3.1 定案一：到零钉死在到零那一刻，不入账），
+                    // 但「引磬只是尽量响」说的是响不响，不是可以响错时候。
                     if let seconds = vm.countdownSeconds {
-                        QingScheduler.schedule(after: seconds, itemName: vm.item.name,
-                                               sound: settings.qingEnabled)
+                        let remaining = seconds - vm.elapsed
+                        if remaining > 0 {
+                            QingScheduler.schedule(after: remaining, itemName: vm.item.name,
+                                                   sound: settings.qingEnabled)
+                        } else {
+                            QingScheduler.cancel()
+                        }
                     }
                 } catch {
                     failure = error.localizedDescription

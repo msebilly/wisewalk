@@ -428,6 +428,37 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
 }
 
 @MainActor
+@Test func 重复撤销留下哪一条不许随输入顺序变() throws {
+    // §5.7 的次键 `id.uuidString`。我原先把它记成「已知空洞，不补」，
+    // 理由是「两条 amount 与 note 必然相同，要钉住它得把实现抄进断言」。
+    // **那个理由不完整**：两条重复撤销来自不同设备，`deviceName` 就不同,
+    // 而流水页把它显示出来。
+    //
+    // 没有次键时，`createdAt` 并列的两条谁活下来取决于 `sorted` 收到的输入顺序,
+    // 而各设备的 CloudKit 拉取顺序不受任何约束——同一条流水，
+    // 这台显示「iPhone·本机」，那台显示「iPad·别人」。
+    //
+    // 断言写成「换个输入顺序，活下来的还是同一条」，
+    // **不抄实现的排序规则**，只钉住它买到的那个性质：结果与输入顺序无关。
+    let (_, ctx, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+    let 被撤的 = UUID()
+    func 造(_ 设备: String) -> PracticeSession {
+        PracticeSession(item: item, dayKey: 20260728, tzOffsetMinutes: 480,
+                        amount: -500, startedAt: now, endedAt: now, source: .adjustment,
+                        deviceName: 设备, note: "revoke:\(被撤的.uuidString)", createdAt: now)
+    }
+    let 甲 = 造("iPhone·本机"), 乙 = 造("iPad·别人")
+    ctx.insert(甲); ctx.insert(乙); try ctx.save()
+
+    let 正序 = DayLedger.dedupedRevocations([甲, 乙])
+    let 倒序 = DayLedger.dedupedRevocations([乙, 甲])
+    #expect(正序.count == 1 && 倒序.count == 1, "两条重复撤销只该活下来一条")
+    #expect(正序.first?.deviceName == 倒序.first?.deviceName,
+            "活下来的必须是同一条，不许随 CloudKit 的拉取顺序变")
+}
+
+@MainActor
 @Test func 不带撤销标记的调整笔不参与去重() throws {
     // 去重的两个条件里，「`revoke:` 前缀」这一条今天是为**将来**承重的：
     // `revoke` 是眼下唯一写 .adjustment 的地方，note 全带这个前缀，
