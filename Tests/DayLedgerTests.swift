@@ -426,3 +426,34 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
             "同一笔的两条撤销在列表里只该出现一条")
     #expect(rows.count == 2, "原记录 + 一条撤销")
 }
+
+@MainActor
+@Test func 不带撤销标记的调整笔不参与去重() throws {
+    // 去重的两个条件里，「`revoke:` 前缀」这一条今天是为**将来**承重的：
+    // `revoke` 是眼下唯一写 .adjustment 的地方，note 全带这个前缀，
+    // 所以去掉前缀判断，现有测试一条都不会红（实测过，355 全绿）。
+    //
+    // 但哪天有人加了第二个 .adjustment 写入口而 note 留空或另有含义，
+    // 只按「note 相同」分组就会把**一整批不相干的调整塌成一条**：
+    // 用户扣掉的账凭空回来，方向是「多」，量级不封顶。
+    //
+    // 这条测试就是拦在那儿的。别因为「现在造不出这种数据」就删掉它——
+    // 现在造不出，正是它存在的理由。
+    let (ledger, ctx, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+    _ = try ledger.record(item: item, amount: 1000, source: .counter,
+                          startedAt: now, endedAt: now, at: now, timeZone: 北京时间)
+    for _ in 0..<2 {
+        ctx.insert(PracticeSession(
+            item: item, dayKey: 20260728, tzOffsetMinutes: 480,
+            amount: -100, startedAt: now, endedAt: now, source: .adjustment,
+            deviceName: "iPhone·TEST", note: nil, createdAt: now
+        ))
+    }
+    try ctx.save()
+
+    #expect(try ledger.rawTotal(on: 20260728, itemID: item.id) == 800,
+            "两笔各不相干的调整不是同一组，1000 − 100 − 100 = 800")
+    #expect(try ledger.sessions(on: 20260728, itemID: item.id).count == 3,
+            "一笔原记录 + 两笔调整，一条都不该被吞")
+}
