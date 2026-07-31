@@ -20,7 +20,7 @@ final class DayLedger {
 
     // MARK: - 写
 
-    /// 记一笔。
+    /// 记一笔并**立即落盘**。绝大多数场合用这个。
     ///
     /// - Parameter id: 预生成编号。崩溃恢复时传入草稿里的编号，
     ///   本方法会先查重，已入账则直接返回既有记录，不会重复计数。
@@ -32,6 +32,37 @@ final class DayLedger {
     ///   （快照去重排序与第 3 卷诊断都依赖它）与历史时区偏移。
     @discardableResult
     func record(
+        item: PracticeItem,
+        amount: Int,
+        source: SessionSource,
+        startedAt: Date,
+        endedAt: Date? = nil,
+        at now: Date = Date(),
+        dayStartHour: Int = 0,
+        timeZone: TimeZone = .current,
+        id: UUID = UUID(),
+        note: String? = nil,
+        onDay: Int? = nil
+    ) throws -> PracticeSession {
+        let session = try stage(
+            item: item, amount: amount, source: source,
+            startedAt: startedAt, endedAt: endedAt, at: now,
+            dayStartHour: dayStartHour, timeZone: timeZone,
+            id: id, note: note, onDay: onDay
+        )
+        try saveOrRollback()
+        return session
+    }
+
+    /// 把一笔流水放进上下文但**不落盘**，由调用方决定何时 `save()`。
+    ///
+    /// 查重、dayKey 推导、时区落款与 `record` 完全一致——`record` 就是本方法加一句 save。
+    ///
+    /// 存在的唯一理由：`DraftStore.commit` 要让「写流水」与「删草稿」进**同一次 save**
+    /// （§4.5 第 1 条）。**除此之外不要用它**——忘了 save 就等于用户的功课没记上，
+    /// 而且不会有任何报错。
+    @discardableResult
+    func stage(
         item: PracticeItem,
         amount: Int,
         source: SessionSource,
@@ -63,7 +94,6 @@ final class DayLedger {
             createdAt: now
         )
         context.insert(session)
-        try context.save()
         return session
     }
 
@@ -106,8 +136,34 @@ final class DayLedger {
             createdAt: now
         )
         context.insert(adjustment)
-        try context.save()
+        try saveOrRollback()
         return adjustment
+    }
+
+    /// 落盘，失败就把这次的 insert 撤干净再把错抛出去。
+    ///
+    /// 实测（SDK 26.5）：`save()` 抛错时 store 会一致地回滚，但 **context 的 pending
+    /// 改动不会被清掉**。账本的两个写入口若就这么把错抛出去，那笔已经 insert 进
+    /// context 的流水会一直挂在那儿，被下一次**无关的** save() 顺手提交。
+    ///
+    /// 补记这条路上它最够得着，因为补记没有草稿兜底：
+    /// 用户补记 500 声 → 磁盘满，save 抛错 → 界面老老实实说「记录失败」→
+    /// 用户转身去点计数器 → `DraftStore.update` 每点一下就 save 一次（同一个
+    /// mainContext）→ 那笔 500 声悄没声儿地落了盘。
+    /// **告诉用户没记上、账本上却有**，正顶着「一声都不能多」。
+    ///
+    /// 用户重试一次也一样脏：`plan()` 那句 save 会先把残留的第一笔冲下去，
+    /// `record` 再插一笔全新 UUID 的——500 变 1000。
+    ///
+    /// `DraftStore.commit` 早就为同一个理由做了这件事（`DraftStore.swift` 的
+    /// `rollback()` 那段），只是当时没往账本这边看。
+    private func saveOrRollback() throws {
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
+        }
     }
 
     // MARK: - 读
@@ -125,7 +181,50 @@ final class DayLedger {
         let sameDay = try context.fetch(
             FetchDescriptor<PracticeSession>(predicate: #Predicate { $0.dayKey == key })
         )
-        return sameDay.filter { $0.item?.id == itemID }
+        return Self.dedupedRevocations(sameDay.filter { $0.item?.id == itemID })
+    }
+
+    /// §5.7：把「多台设备各撤了同一笔」合并回一笔。
+    ///
+    /// `revoke` 的幂等键是 `note` 里的 `revoke:<原记录 id>`，可它**只查本机库**。
+    /// 两台设备离线各撤同一笔 500，各自都查不到 → 各建一条 `amount: −500`、
+    /// note 相同、**UUID 不同**的调整流水。CloudKit 合并后两条都在，于是
+    /// `+500 +300 −500 −500 = −200`，`displayTotal` clamp 成 0，用户看到「今天 0 声」——
+    /// 他真念的那 300 声就这么没了，**账面上还看不出哪儿错**。
+    /// 方向是「丢」，且是最难察觉的一种：没有提示，数字只是变小了。
+    ///
+    /// 为什么不在写侧堵：那要靠「确定性 UUID + 框架把两条合成一条」，而
+    /// **CloudKit 用不了 `@Attribute(.unique)`**（见 design-spec §5.2）。没有唯一约束，
+    /// 两台设备各写一条就永远是两条。「事后清理一次」也不成立——只要还有第三台设备
+    /// 可能上线补一条，清理就永远做不完。读侧去重是幂等的，任何时刻算出来都对。
+    ///
+    /// **收在这里，是因为 `total` / `rawTotal` / `roundCount` / 补记页流水全从这儿过。**
+    /// 去重若分散写进每个读者，漏一个就是一处永久错账；第 2 卷有七次实测证据说明
+    /// 「要说两遍的话，早晚有一处说错」。
+    ///
+    /// ⚠️ **分组键是「`revoke:` 前缀」+「完整 note 字符串」两个条件缺一不可。**
+    /// 眼下 `revoke` 是全仓库唯一写 `.adjustment` 的地方、note 全带这个前缀，
+    /// 所以「note 相同」看着等价；哪天有人加了第二个 `.adjustment` 写入口而 note 留空，
+    /// 「note 相同」就会把**一整批不相干的调整塌成一条**。方向是「多」，量级不封顶。
+    ///
+    /// 「撤销那次撤销」不会被误伤：那一笔的 note 是 `revoke:<调整笔自己的 id>`，
+    /// 与被它撤销的那笔不同组。（该路径今天还不存在——`ManualEntryView` 不给撤销行
+    /// 配撤销按钮——但规则先站得住。）
+    ///
+    /// 保留哪一条按 `(createdAt, id.uuidString)` 定，让各设备显示同一条；
+    /// 重复两笔 `amount` 本就相同，总数取哪条都对，这只为列表不看着像数据不一致。
+    static func dedupedRevocations(_ sessions: [PracticeSession]) -> [PracticeSession] {
+        var seen = Set<String>()
+        var dropped = Set<UUID>()
+        for s in sessions.sorted(by: {
+            ($0.createdAt, $0.id.uuidString) < ($1.createdAt, $1.id.uuidString)
+        }) {
+            guard s.source == .adjustment,
+                  let note = s.note, note.hasPrefix("revoke:") else { continue }
+            if !seen.insert(note).inserted { dropped.insert(s.id) }
+        }
+        guard !dropped.isEmpty else { return sessions }
+        return sessions.filter { !dropped.contains($0.id) }
     }
 
     /// 某天某项的显示总数（负数已 clamp 到 0）。
@@ -136,6 +235,17 @@ final class DayLedger {
     /// 某天某项的账本原值（可能为负）。诊断与导出使用。
     func rawTotal(on dayKey: Int, itemID: UUID) throws -> Int {
         LedgerMath.rawTotal(try sessions(on: dayKey, itemID: itemID))
+    }
+
+    /// 当日「做了几回」。计时类就是坐数。
+    ///
+    /// 撤销与修正走 `.adjustment`，它们是对既有一坐的更正，不是新的一坐；
+    /// 负数流水更不该算。少数掉一坐比多数一坐好：多数出来的那一坐用户
+    /// 对不上账，只会以为自己记错了。
+    func roundCount(on dayKey: Int, itemID: UUID) throws -> Int {
+        try sessions(on: dayKey, itemID: itemID)
+            .filter { $0.amount > 0 && $0.source != .adjustment }
+            .count
     }
 
     /// 该编号是否已入账。崩溃恢复前必查。
@@ -160,7 +270,8 @@ final class DayLedger {
         return Self.merge(dayKey: dayKey, snapshots: existing)
     }
 
-    /// 取某天的应做计划；该日尚无任何快照时才依 `activeItems` 生成并落库。
+    /// 取某天的应做计划。**两条路都可能落库**：该日尚无快照时依 `activeItems` 生成一条；
+    /// 已有快照时走 `appendLateArrivals`，把同步迟到的定课补成新的一条（无迟到项则不写）。
     ///
     /// **已存在快照里各项的目标绝不改写。** 用户今天把目标从 1000 调到 3000，
     /// 上个月那些标着圆满的日子不能因此变回未完成——那等于告诉他过去三十天白做了。
@@ -183,9 +294,26 @@ final class DayLedger {
     ///
     /// 代价（已知并接受）：已归档的功课当天可能多唠叨一次，
     /// 某天也可能在更全的信息同步进来后由圆满退回待完成。
-    func plan(for dayKey: Int, activeItems: [PracticeItem]) throws -> DayPlan {
+    /// - Parameter dayStartHour: **必须与算出 `dayKey` 的那把尺子一致。**
+    ///   今日页的 `dayKey` 出自 `DayKey.today(dayStartHour:)`，就传同一个值；
+    ///   补记页的 `selectedDayKey` 出自 `DayKey.fromCalendarDate`（日历格子，不减 dayStartHour），
+    ///   就传 `0`。两把尺子混着比大小的后果，`ManualEntryViewModel.validate` 的注释里有实例。
+    ///   **本参数没有默认值，就是要每个调用点自己说清楚用的哪把尺子**——
+    ///   本仓库的 `dayStartHour: Int = 0` 已经害过一次：漏传一处就静默退回 0 点，没有任何测试会红。
+    func plan(
+        for dayKey: Int,
+        activeItems: [PracticeItem],
+        dayStartHour: Int,
+        timeZone: TimeZone
+    ) throws -> DayPlan {
         if let existing = try existingPlan(for: dayKey) {
-            return existing
+            return try appendLateArrivals(
+                to: existing,
+                dayKey: dayKey,
+                activeItems: activeItems,
+                dayStartHour: dayStartHour,
+                timeZone: timeZone
+            )
         }
 
         let required = activeItems.filter { !$0.isArchived }
@@ -202,8 +330,100 @@ final class DayLedger {
             goals: goals
         )
         context.insert(snapshot)
-        try context.save()
+        try saveOrRollback()
         return DayPlan(dayKey: dayKey, requiredItemIDs: snapshot.requiredItemIDs, goals: goals)
+    }
+
+    /// 该日已有快照时，把「那天开始之前就立好、只是数据晚到」的定课追加进去。
+    ///
+    /// **为什么需要它**（`docs/design-spec.md` §5.6 写侧，2026-07-30 定案走此路）：
+    /// 换新机或重装后首次启动，CloudKit 可能一条定课都还没推下来。此时今日页一露面
+    /// 就给今天定格了一条 `requiredItemIDs: []` 的快照，那天从此是「无课日」——
+    /// `TodayViewModel.isRestDay` 的文档写明它**不计入分母，也不中断**，
+    /// 等于替用户抹掉一天欠账；而且推给了所有设备，「已存在则沿用」意味着再也改不回来。
+    ///
+    /// **判据是「那天开始的时候这门课活没活着」，不是「本机是不是刚看见它」。**
+    /// 后者分不清「同步迟到」与「用户今天刚立」：无差别并进来，
+    /// 上午已显示圆满的那天会因为下午新立了一门课而退回未圆满。
+    /// 用的是 `PracticeItem.activatedAt` 而不是 `createdAt`：一门课立于上月、上周归档、
+    /// 今天下午恢复，按 `createdAt` 判就会被追加进今天，**把用户已挣到的圆满收回去**。
+    /// `activatedAt` 记的是最近一次成为活跃状态的时刻，与它何时同步到本机无关，
+    /// 正是要问的那句话。守卫见 `今天恢复的归档定课不会被追加进今天`
+    /// 与 `昨天恢复的归档定课同步进来后仍要被追加`——这两条只差在恢复发生在哪一天。
+    ///
+    /// **⚠️ 本判据与初次定格不对称，是有意的，别去「修平」它。**
+    /// 初次定格照收全部在册定课、包括今天刚立的（`plan` 的 else 分支，
+    /// 守卫 `初次定格仍旧收下全部在册定课`）；本方法则把今天才激活的挡在外面。
+    /// 于是「今天新立的课今天算不算数」取决于该日有没有别的设备先定过格。
+    /// 曾经有人（包括写这段的人）把它解释成「新立的课按规矩从明天算起」——
+    /// **仓库里没有这条规矩，那是编的。** 真正的理由是两个分支在答不同的问题：
+    /// 初次定格反映用户此刻的意图，他正看着 App，刚立的课当然要做；
+    /// 追加是在修一次数据不全的定格，只补当时缺的那部分，
+    /// **不把定格之后才发生的意图变化折进去**，否则就是替他改写已经过完的半天。
+    /// 代价是可预期性：同一件事在两台设备上可能给不同答案。接受它，
+    /// 是因为初次定格只在该日尚无任何快照时触发，那一刻没有圆满可夺。
+    ///
+    /// **已知并接受的洞**：日初还活着、当天稍后在别处归档、本机只收到归档态的项，
+    /// 永远补不回来——`activeItems()` 按 `isArchived == false` 过滤，它压根进不了这里。
+    /// 这与初次定格的既有语义一致：十点归档、十一点才第一次打开，那天本来也不含它。
+    /// 要堵得再加一个 `archivedAt` 同步字段，2026-07-30 权衡后不加。
+    ///
+    /// **两个 dayKey 直接比，不把 dayKey 反解成 Date。**
+    /// `DayKeyCalendar.calendarDate(of:)` 的注释讲过为什么不能取零点：
+    /// 夏令时切换日的零点根本不存在，构造出来是 nil 或被日历悄悄挪到前一天。
+    /// 把 `activatedAt` 也换算成 dayKey 问的是同一件事，却全程不碰 Date 重建。
+    ///
+    /// `activatedAt` 若是 `.distantPast`（CloudKit 推来的记录缺该字段时的兜底值），
+    /// 算出来的 dayKey 远小于任何真实日期，于是**一律追加**。方向是保守那一侧：
+    /// 进了分母顶多显示未圆满，漏掉才是替他免单。
+    ///
+    /// **没有迟到项就一个字都不落盘**，否则每次 reload 都写一条。
+    /// 追加的是**新的一条**快照，原有各条纹丝不动——「快照绝不回溯改写」的铁律不破；
+    /// 并集交给 `merge`，幂等且可交换，两台设备各追加一条也不会出错。
+    ///
+    /// **本方法只补当次调用问的那一天**，不回溯扫描别的日子。
+    /// 第 5 卷月历一律走只读的 `existingPlan(for:)`，翻月历不替任何一天补。
+    /// 但补记页会对它问的那个历史日调本方法，所以**历史日并非永远补不了**：
+    /// 用户再补记一次那天，缺的项就补上了，那天可能因此从圆满退回未圆满。
+    /// 这是对的——补记页上的日子恰恰是他还能补做的日子。
+    ///
+    /// **判据绝不可套到初次定格上。** 初次定格照收全部在册定课，哪怕它们是今天才立的：
+    /// 新用户补录过去三十天，那些课全是今天立的，一滤就是三十条空快照，
+    /// 每天记着几百声却显示「无课」——正是本方法要治的病，反被治法造出来。
+    /// 守卫见 `初次定格仍旧收下全部在册定课`。
+    private func appendLateArrivals(
+        to existing: DayPlan,
+        dayKey: Int,
+        activeItems: [PracticeItem],
+        dayStartHour: Int,
+        timeZone: TimeZone
+    ) throws -> DayPlan {
+        let known = Set(existing.requiredItemIDs)
+        let late = activeItems.filter { item in
+            guard !item.isArchived, !known.contains(item.id) else { return false }
+            let activeSince = DayKey.make(
+                from: item.activatedAt,
+                tzOffsetMinutes: DayKey.currentOffsetMinutes(at: item.activatedAt, timeZone: timeZone),
+                dayStartHour: dayStartHour
+            )
+            return activeSince < dayKey
+        }
+        guard !late.isEmpty else { return existing }
+
+        var goals: [String: Int] = [:]
+        for item in late {
+            if let goal = item.dailyGoal, goal > 0 {
+                goals[item.id.uuidString] = goal
+            }
+        }
+        context.insert(
+            DaySnapshot(dayKey: dayKey, requiredItemIDs: late.map(\.id), goals: goals)
+        )
+        try saveOrRollback()
+
+        // 追加这条必须和原有各条一起重过 `merge`：目标的取值规则是
+        // 「含该项的最早一条快照」，在这里自己拼会绕过它。
+        return try existingPlan(for: dayKey) ?? existing
     }
 
     /// 把同日多条快照合并成只读 `DayPlan`。纯函数，不碰上下文，故不会写库。

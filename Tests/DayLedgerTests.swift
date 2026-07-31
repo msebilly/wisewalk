@@ -293,3 +293,203 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     #expect(s.dayKey == 20260728)
     #expect(s.createdAt == now)
 }
+
+@MainActor
+@Test func stage不落盘而record落盘() throws {
+    let (ledger, ctx, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+
+    let staged = try ledger.stage(item: item, amount: 108, source: .counter,
+                                  startedAt: now, at: now, timeZone: 北京时间)
+    #expect(staged.amount == 108)
+    #expect(ctx.hasChanges, "stage 之后应当还有未落盘的改动")
+
+    // 必须另开一个 context 才问得出「进没进 store」：FetchDescriptor.includePendingChanges
+    // 默认为 true，同一个 ctx 上查会把未落盘的 insert 也算进去，什么也证明不了。
+    #expect(try ModelContext(ctx.container).fetch(FetchDescriptor<PracticeSession>()).isEmpty,
+            "stage 只是暂存，别的 context 不该看见这笔")
+
+    try ctx.save()
+    #expect(try ledger.total(on: 20260728, itemID: item.id) == 108)
+    #expect(try ModelContext(ctx.container).fetch(FetchDescriptor<PracticeSession>()).count == 1,
+            "save 之后这笔才真正落进 store")
+}
+
+@MainActor
+@Test func stage与record查重逻辑一致() throws {
+    let (ledger, ctx, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+    let id = UUID()
+
+    let first = try ledger.record(item: item, amount: 100, source: .counter,
+                                  startedAt: now, at: now, timeZone: 北京时间, id: id)
+    let again = try ledger.stage(item: item, amount: 100, source: .counter,
+                                 startedAt: now, at: now, timeZone: 北京时间, id: id)
+    try ctx.save()
+
+    #expect(first.id == again.id, "stage 必须和 record 命中同一道查重")
+    #expect(try ledger.sessions(on: 20260728, itemID: item.id).count == 1, "查重失效，记出了第二笔")
+    #expect(try ledger.total(on: 20260728, itemID: item.id) == 100)
+}
+
+@MainActor
+@Test func stage同样支持补记到指定日期() throws {
+    let (ledger, ctx, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+    try ledger.stage(item: item, amount: 50, source: .manual,
+                     startedAt: now, at: now, timeZone: 北京时间, onDay: 20260701)
+    try ctx.save()
+    #expect(try ledger.total(on: 20260701, itemID: item.id) == 50)
+    #expect(try ledger.total(on: 20260728, itemID: item.id) == 0)
+}
+
+@MainActor
+@Test func record仍旧自己落盘不需要调用方再save() throws {
+    let (ledger, ctx, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+    try ledger.record(item: item, amount: 7, source: .counter,
+                      startedAt: now, at: now, timeZone: 北京时间)
+    #expect(!ctx.hasChanges, "record 应当已经落盘，不该留下未保存的改动")
+}
+
+@MainActor
+@Test func 两台设备各撤一次同一笔只扣一次() throws {
+    // §5.7。离线时两台设备各撤销同一笔 500，各自查本地都查不到那个幂等键，
+    // 于是各建一笔 amount −500、note 同为 "revoke:<同一个 id>"、**但 UUID 不同**
+    // 的调整流水。CloudKit 合并后两笔都在库里，就是下面手工造出来的样子。
+    //
+    // 不去重的话：+500 +300 −500 −500 = −200，`total` clamp 成 0，
+    // 用户看到「今天 0 声」——他真念的那 300 声就这么没了，**账面上还看不出哪儿错**。
+    // 方向是「丢」，且是最难察觉的一种：没有任何提示，数字只是变小了。
+    //
+    // 造两条同 note 不同 UUID 的记录直接 insert，不必等真容器。
+    let (ledger, ctx, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+    let 五百 = try ledger.record(item: item, amount: 500, source: .counter,
+                               startedAt: now, endedAt: now, at: now, timeZone: 北京时间)
+    _ = try ledger.record(item: item, amount: 300, source: .counter,
+                          startedAt: now, endedAt: now, at: now, timeZone: 北京时间)
+
+    // 本机撤一次
+    _ = try ledger.revoke(五百, at: now, timeZone: 北京时间)
+    // 另一台设备离线时也撤了同一笔，同步过来
+    let 远端那笔 = PracticeSession(
+        item: item, dayKey: 五百.dayKey, tzOffsetMinutes: 五百.tzOffsetMinutes,
+        amount: -500, startedAt: now, endedAt: now, source: .adjustment,
+        deviceName: "iPad·别人", note: "revoke:\(五百.id.uuidString)", createdAt: now
+    )
+    ctx.insert(远端那笔)
+    try ctx.save()
+
+    #expect(try ledger.rawTotal(on: 20260728, itemID: item.id) == 300,
+            "同一笔只该被撤一次：500 + 300 − 500 = 300")
+    #expect(try ledger.total(on: 20260728, itemID: item.id) == 300,
+            "他真念的那 300 声不能被 clamp 掩盖成 0")
+}
+
+@MainActor
+@Test func 撤不同的两笔各扣各的() throws {
+    // 去重的键是**完整 note 字符串**，不是「note 非空」也不是「同 item 同 amount」。
+    // 写松一档就会把两笔撤销塌成一笔——那 500 声凭空回来了，方向是「多」。
+    let (ledger, _, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+    let a = try ledger.record(item: item, amount: 500, source: .counter,
+                              startedAt: now, endedAt: now, at: now, timeZone: 北京时间)
+    let b = try ledger.record(item: item, amount: 500, source: .counter,
+                              startedAt: now, endedAt: now, at: now, timeZone: 北京时间)
+    _ = try ledger.revoke(a, at: now, timeZone: 北京时间)
+    _ = try ledger.revoke(b, at: now, timeZone: 北京时间)
+
+    #expect(try ledger.rawTotal(on: 20260728, itemID: item.id) == 0,
+            "两笔各撤各的，金额一样也不是同一组")
+}
+
+@MainActor
+@Test func 重复的撤销笔在流水里也只出现一次() throws {
+    // 补记页那列流水读的也是 sessions()。重复那笔留在列表里，
+    // 用户会看见两条一模一样的「撤销 −500」，以为自己手滑撤了两次，
+    // 转头就去补记页把 500 补回来——那才是真的多记。
+    let (ledger, ctx, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+    let 五百 = try ledger.record(item: item, amount: 500, source: .counter,
+                               startedAt: now, endedAt: now, at: now, timeZone: 北京时间)
+    _ = try ledger.revoke(五百, at: now, timeZone: 北京时间)
+    ctx.insert(PracticeSession(
+        item: item, dayKey: 五百.dayKey, tzOffsetMinutes: 五百.tzOffsetMinutes,
+        amount: -500, startedAt: now, endedAt: now, source: .adjustment,
+        deviceName: "iPad·别人", note: "revoke:\(五百.id.uuidString)", createdAt: now
+    ))
+    try ctx.save()
+
+    let rows = try ledger.sessions(on: 20260728, itemID: item.id)
+    #expect(rows.filter { $0.source == .adjustment }.count == 1,
+            "同一笔的两条撤销在列表里只该出现一条")
+    #expect(rows.count == 2, "原记录 + 一条撤销")
+}
+
+@MainActor
+@Test func 重复撤销留下哪一条不许随输入顺序变() throws {
+    // §5.7 的次键 `id.uuidString`。我原先把它记成「已知空洞，不补」，
+    // 理由是「两条 amount 与 note 必然相同，要钉住它得把实现抄进断言」。
+    // **那个理由不完整**：两条重复撤销来自不同设备，`deviceName` 就不同,
+    // 而流水页把它显示出来。
+    //
+    // 没有次键时，`createdAt` 并列的两条谁活下来取决于 `sorted` 收到的输入顺序,
+    // 而各设备的 CloudKit 拉取顺序不受任何约束——同一条流水，
+    // 这台显示「iPhone·本机」，那台显示「iPad·别人」。
+    //
+    // 断言写成「换个输入顺序，活下来的还是同一条」，
+    // **不抄实现的排序规则**，只钉住它买到的那个性质：结果与输入顺序无关。
+    let (_, ctx, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+    let 被撤的 = UUID()
+    func 造(_ 设备: String) -> PracticeSession {
+        PracticeSession(item: item, dayKey: 20260728, tzOffsetMinutes: 480,
+                        amount: -500, startedAt: now, endedAt: now, source: .adjustment,
+                        deviceName: 设备, note: "revoke:\(被撤的.uuidString)", createdAt: now)
+    }
+    let 甲 = 造("iPhone·本机"), 乙 = 造("iPad·别人")
+    ctx.insert(甲); ctx.insert(乙); try ctx.save()
+
+    let 正序 = DayLedger.dedupedRevocations([甲, 乙])
+    let 倒序 = DayLedger.dedupedRevocations([乙, 甲])
+    #expect(正序.count == 1 && 倒序.count == 1, "两条重复撤销只该活下来一条")
+    #expect(正序.first?.deviceName == 倒序.first?.deviceName,
+            "活下来的必须是同一条，不许随 CloudKit 的拉取顺序变")
+}
+
+@MainActor
+@Test func 不带撤销标记的调整笔不参与去重() throws {
+    // 去重的两个条件里，「`revoke:` 前缀」这一条今天是为**将来**承重的：
+    // `revoke` 是眼下唯一写 .adjustment 的地方，note 全带这个前缀，
+    // 所以去掉前缀判断，现有测试一条都不会红（实测过，355 全绿）。
+    //
+    // 但哪天有人加了第二个 .adjustment 写入口、note 另有含义（这里造的是
+    // 两笔备注都写「年度盘账」的调整），只按「note 相同」分组就会把
+    // **一整批不相干的调整塌成一条**：
+    // 用户扣掉的账凭空回来，方向是「多」，量级不封顶。
+    //
+    // 这条测试就是拦在那儿的。别因为「现在造不出这种数据」就删掉它——
+    // 现在造不出，正是它存在的理由。
+    //
+    // ⚠️ 备注必须**非空**。写 `note: nil` 的话两个版本都走 `guard let note`
+    // 那条路提前 continue，测试会为错误的原因通过——初版就是这么写的，
+    // 变异跑出 356 全绿才发现。
+    let (ledger, ctx, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+    _ = try ledger.record(item: item, amount: 1000, source: .counter,
+                          startedAt: now, endedAt: now, at: now, timeZone: 北京时间)
+    for _ in 0..<2 {
+        ctx.insert(PracticeSession(
+            item: item, dayKey: 20260728, tzOffsetMinutes: 480,
+            amount: -100, startedAt: now, endedAt: now, source: .adjustment,
+            deviceName: "iPhone·TEST", note: "年度盘账", createdAt: now
+        ))
+    }
+    try ctx.save()
+
+    #expect(try ledger.rawTotal(on: 20260728, itemID: item.id) == 800,
+            "两笔各不相干的调整不是同一组，1000 − 100 − 100 = 800")
+    #expect(try ledger.sessions(on: 20260728, itemID: item.id).count == 3,
+            "一笔原记录 + 两笔调整，一条都不该被吞")
+}

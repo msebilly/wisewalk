@@ -15,7 +15,7 @@ import Foundation
         dailyGoal: 1000,
         scheduleRule: .daily,
         reminderTimes: [360, 1290],
-        templateKey: "nianfo"
+        templateKey: "chanting"   // 与 TemplateCatalog.all[0].key 对齐
     )
     ctx.insert(item)
 
