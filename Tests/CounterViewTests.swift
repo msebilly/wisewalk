@@ -4,6 +4,28 @@ import SwiftData
 import Foundation
 @testable import WiseWalk
 
+// MARK: - 这个文件测到了什么，没测到什么
+//
+// **测到的只有两样**：`CounterView.bigNumberText` 这个纯函数，以及视图能否实例化。
+// 计数器的行为（草稿承接、结束落账、一声没念不留空账）全部由
+// `CounterViewModelTests` 覆盖，那里一律固定时区、固定时刻。
+//
+// **这里曾经有三条同名不同实的重复**（`进页面会承接未提交的草稿`、
+// `页面退出时提交一笔`、`一声没数就退出不留空记录`），它们用 `DayKey.today()`，
+// 也就是 `Date()` + `TimeZone.current`。2026-07-31 实测这个走样：
+// 把 `CounterViewModel.start` 里的 `self.timeZone = timeZone` 改成 `.current`，
+// `CounterViewModelTests` **红 6 条 10 个 issue**，这三条**一条都不红**——
+// 断言和实现用的是同一把歪尺子。它们比被重复的那三条还弱
+// （按天过滤的 `sessions(on:).isEmpty` vs 全库的 `库里一条流水都没有`），
+// 所以删掉，不是改稳。`AppEnvironment` 的装配由
+// `AppEnvironmentTests.装配后三个仓储共用同一个上下文` 管，也不归这里。
+//
+// **视图接线没有任何覆盖**：哪个字段传给哪个参数、§6.2「结束与返回区域不参与计数」
+// 靠 `safeAreaInset` 结构性分层保证——改错了都不会红。
+// 实测：大号数字 `vm.dayTotal` → `vm.count`，全绿。
+// 目前唯一的对策是结构性的（`subtitle` 收进一个计算属性，
+// 可见文字与 VoiceOver 共用同一处），**这不是覆盖，别当成覆盖**。
+
 @MainActor
 private func makeCounterEnv() throws -> (AppEnvironment, PracticeItem) {
     let env = try AppEnvironment(container: ModelContainerFactory.inMemory(),
@@ -42,44 +64,4 @@ private func makeCounterEnv() throws -> (AppEnvironment, PracticeItem) {
     #expect(CounterView.bigNumberText(1000) == "1000", "别出现千分位逗号")
     #expect(CounterView.bigNumberText(0) == "0")
     #expect(CounterView.bigNumberText(108) == "108")
-}
-
-@MainActor
-@Test func 进页面会承接未提交的草稿() throws {
-    // 崩溃后重进，之前数的不能凭空消失。
-    let (env, item) = try makeCounterEnv()
-    let a = CounterViewModel(item: item, drafts: env.drafts, ledger: env.ledger)
-    try a.start()
-    try a.tap(); try a.tap(); try a.tap()
-    #expect(a.count == 3)
-
-    let b = CounterViewModel(item: item, drafts: env.drafts, ledger: env.ledger)
-    try b.start()
-    #expect(b.count == 3, "重进页面把之前数的 3 声丢了")
-}
-
-@MainActor
-@Test func 页面退出时提交一笔() throws {
-    let (env, item) = try makeCounterEnv()
-    let vm = CounterViewModel(item: item, drafts: env.drafts, ledger: env.ledger)
-    try vm.start()
-    for _ in 0..<108 { try vm.tap() }
-    #expect(try env.ledger.total(on: DayKey.today(), itemID: item.id) == 0,
-            "§6.2：结束时才写入，中途不许落账")
-
-    let s = try vm.finish()
-    #expect(s?.amount == 108)
-    #expect(s?.source == .counter)
-    #expect(try env.ledger.total(on: DayKey.today(), itemID: item.id) == 108)
-    #expect(try env.drafts.pendingDrafts().isEmpty, "提交后草稿必须清掉")
-}
-
-@MainActor
-@Test func 一声没数就退出不留空记录() throws {
-    let (env, item) = try makeCounterEnv()
-    let vm = CounterViewModel(item: item, drafts: env.drafts, ledger: env.ledger)
-    try vm.start()
-    #expect(try vm.finish() == nil)
-    #expect(try env.ledger.sessions(on: DayKey.today(), itemID: item.id).isEmpty)
-    #expect(try env.drafts.pendingDrafts().isEmpty)
 }
