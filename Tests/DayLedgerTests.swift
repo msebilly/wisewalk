@@ -433,12 +433,17 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     // `revoke` 是眼下唯一写 .adjustment 的地方，note 全带这个前缀，
     // 所以去掉前缀判断，现有测试一条都不会红（实测过，355 全绿）。
     //
-    // 但哪天有人加了第二个 .adjustment 写入口而 note 留空或另有含义，
-    // 只按「note 相同」分组就会把**一整批不相干的调整塌成一条**：
+    // 但哪天有人加了第二个 .adjustment 写入口、note 另有含义（这里造的是
+    // 两笔备注都写「年度盘账」的调整），只按「note 相同」分组就会把
+    // **一整批不相干的调整塌成一条**：
     // 用户扣掉的账凭空回来，方向是「多」，量级不封顶。
     //
     // 这条测试就是拦在那儿的。别因为「现在造不出这种数据」就删掉它——
     // 现在造不出，正是它存在的理由。
+    //
+    // ⚠️ 备注必须**非空**。写 `note: nil` 的话两个版本都走 `guard let note`
+    // 那条路提前 continue，测试会为错误的原因通过——初版就是这么写的，
+    // 变异跑出 356 全绿才发现。
     let (ledger, ctx, item) = try makeLedger()
     let now = 北京(7, 28, 9, 0)
     _ = try ledger.record(item: item, amount: 1000, source: .counter,
@@ -447,7 +452,7 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
         ctx.insert(PracticeSession(
             item: item, dayKey: 20260728, tzOffsetMinutes: 480,
             amount: -100, startedAt: now, endedAt: now, source: .adjustment,
-            deviceName: "iPhone·TEST", note: nil, createdAt: now
+            deviceName: "iPhone·TEST", note: "年度盘账", createdAt: now
         ))
     }
     try ctx.save()
