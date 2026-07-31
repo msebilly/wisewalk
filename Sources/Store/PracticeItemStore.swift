@@ -162,6 +162,16 @@ final class PracticeItemStore {
         if measureType != item.measureType, try hasAnyHistory(item) {
             throw PracticeItemStoreError.measureTypeLockedByHistory
         }
+        // ⛔ **这里绝不许把 `dailyGoal` 同步进任何 `DaySnapshot.goals`。**
+        //
+        // 「改今天的目标不会把 7 月 1 日的圆满收回去」这条保障，是靠**这里什么都不做**
+        // 撑着的——没有一道 `if` 守着它，所以它看起来像个疏忽，很容易被人「补上」。
+        // 真补上了，用户把念佛目标从 1000 调到 100000，过去每一个圆满的日子会当场
+        // 变回未完成。spec §6.6 点名要求「改目标只影响今后」须在 UI 上明示，
+        // 那句话的前提就是这件事真的成立。
+        //
+        // 安全网在 `改目标不改历史圆满` 与 `补记不覆盖已有快照` 两条测试上——
+        // 2026-07-31 实测：一旦在这儿加上目标传播，它们连同第三条一起变红。
         item.name = name
         item.measureType = measureType
         item.unit = unit

@@ -273,3 +273,23 @@ private func makeEditorEnv() throws -> (PracticeItemStore, DayLedger) {
     // 而「非空」对一个写错的名字照样成立。名字里说的是「从预置里挑」，就验这个。
     #expect(TemplateCatalog.iconChoices.contains(vm.iconName), "默认图标必须在候选里")
 }
+
+@MainActor
+@Test func 打勾类不给每日目标() throws {
+    // ⛔ 打勾类一天最多记 1，而 `LedgerMath.isFulfilled` 算的是 `total >= goal`。
+    // 给它设「每日目标 108」就是 `1 >= 108`——**用户天天打勾、天天不圆满**，
+    // 而且找不出原因：他不会想到是那个自己随手点过的目标数。
+    //
+    // 初版 `goalChips` 把计数类那一套（[nil, 108, 1080]）原样给了打勾类，
+    // 于是「每日目标」连同 108、1080 两个档明晃晃摆在早晚课的表单上。
+    // 圆满是这个 App 唯一一处替用户下的判断，不许它被一次随手点击永久夺走。
+    let (items, _) = try makeEditorEnv()
+    let vm = ItemEditorViewModel(store: items)
+    vm.name = "早课"
+    vm.measureType = .check
+    #expect(vm.goalChips.isEmpty, "打勾类没有「每日目标」可言")
+
+    vm.goalDisplay = 108
+    #expect(vm.dailyGoal == nil, "就算硬塞进来也不许留下")
+    #expect(try vm.save().dailyGoal == nil, "更不许落库")
+}

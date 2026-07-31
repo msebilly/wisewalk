@@ -32,9 +32,11 @@ final class ItemEditorViewModel {
 
     /// `nil` 即「不设目标」，此时做了就算圆满。
     /// 非正值一律归为 `nil`——「目标 0 声」不是用户想表达的意思。
+    ///
+    /// **打勾类一律 `nil`。** 见 `goalChips` 上那段。
     var dailyGoal: Int? {
         get { _dailyGoal }
-        set { _dailyGoal = (newValue ?? 0) > 0 ? newValue : nil }
+        set { _dailyGoal = (measureType != .check && (newValue ?? 0) > 0) ? newValue : nil }
     }
     private var _dailyGoal: Int?
 
@@ -76,7 +78,9 @@ final class ItemEditorViewModel {
         // 编辑页打开时目标是空的，用户多半只当自己没设过。
         measureType = item.measureType
         unit = item.unit
-        _dailyGoal = item.dailyGoal
+        // 走 setter 而不是直接写 `_dailyGoal`：同步来的旧数据里可能有
+        // 「打勾类带着目标」这种在本版本已经不许存在的组合，进来洗一遍。
+        dailyGoal = item.dailyGoal
     }
 
     /// 界面上填的目标值。
@@ -95,8 +99,17 @@ final class ItemEditorViewModel {
     }
 
     /// 当前量法该给哪几个快捷档。
+    ///
+    /// **打勾类一个都不给。** 它一天最多记 1，而 `LedgerMath.isFulfilled` 算的是
+    /// `total >= goal`——给它设个 108 就是 `1 >= 108`，用户天天打勾、天天不圆满，
+    /// 而且找不出原因：他不会想到是那个自己随手点过的目标数。
+    /// 视图据此整节隐藏「每日目标」，`dailyGoal` 的 setter 那一侧也一并挡住。
     var goalChips: [Int?] {
-        measureType == .duration ? TemplateCatalog.durationGoalChips : TemplateCatalog.goalChips
+        switch measureType {
+        case .duration: TemplateCatalog.durationGoalChips
+        case .check: []
+        case .count: TemplateCatalog.goalChips
+        }
     }
 
     /// 套用模板。只带出名称、量法、量词与图标，**不带目标值**——

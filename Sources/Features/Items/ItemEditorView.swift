@@ -42,36 +42,40 @@ struct ItemEditorView: View {
                 }
             }
 
-            Section {
-                ForEach(vm.goalChips, id: \.self) { chip in
-                    Button {
-                        vm.goalDisplay = chip
-                        goalText = chip.map(String.init) ?? ""
-                    } label: {
-                        HStack {
-                            Text(chip.map { goalLabel($0) } ?? "不设目标")
-                                .foregroundStyle(theme.primaryText)
-                            Spacer()
-                            if vm.goalDisplay == chip {
-                                Image(systemName: "checkmark").foregroundStyle(theme.accent)
+            // 打勾类整节不出现：它一天最多记 1，摆一个「每日目标 108」在那儿，
+            // 用户点了就再也圆满不了，且看不出是为什么。见 `goalChips` 的注释。
+            if vm.measureType != .check {
+                Section {
+                    ForEach(vm.goalChips, id: \.self) { chip in
+                        Button {
+                            vm.goalDisplay = chip
+                            goalText = chip.map(String.init) ?? ""
+                        } label: {
+                            HStack {
+                                Text(chip.map { goalLabel($0) } ?? "不设目标")
+                                    .foregroundStyle(theme.primaryText)
+                                Spacer()
+                                if vm.goalDisplay == chip {
+                                    Image(systemName: "checkmark").foregroundStyle(theme.accent)
+                                }
                             }
                         }
                     }
+                    HStack {
+                        Text("自定")
+                        Spacer()
+                        TextField("不设目标", text: $goalText)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .font(.body.monospacedDigit())
+                            .frame(maxWidth: 120)
+                            .onChange(of: goalText) { _, t in vm.goalDisplay = Int(t) }
+                    }
+                } header: {
+                    Text(vm.measureType == .duration ? "每日目标（分钟）" : "每日目标")
+                } footer: {
+                    Text(Self.goalDisclaimer)
                 }
-                HStack {
-                    Text("自定")
-                    Spacer()
-                    TextField("不设目标", text: $goalText)
-                        .keyboardType(.numberPad)
-                        .multilineTextAlignment(.trailing)
-                        .font(.body.monospacedDigit())
-                        .frame(maxWidth: 120)
-                        .onChange(of: goalText) { _, t in vm.goalDisplay = Int(t) }
-                }
-            } header: {
-                Text(vm.measureType == .duration ? "每日目标（分钟）" : "每日目标")
-            } footer: {
-                Text(Self.goalDisclaimer)
             }
 
             Section("图标") {
