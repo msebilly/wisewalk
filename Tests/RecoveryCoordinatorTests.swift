@@ -34,6 +34,33 @@ private func makeRecovery() throws -> (RecoveryCoordinator, AppEnvironment, Prac
 }
 
 @MainActor
+@Test func 查不到功课时记上要报错而不是悄悄什么都不做() throws {
+    // 从前「草稿不在手里」与「查不到那门功课」并在同一个 guard 里，
+    // 两条都是「从 pending 里抹掉、返回」。前者对，后者是「多」的源头：
+    //
+    //   用户按「记上」→ 弹窗消失、什么都没发生、一个字也没说 → 他以为没记上 →
+    //   照着记忆手动补记一遍 → 而草稿还躺在盘上，下次启动弹窗又问同一份 →
+    //   他再按一次「记上」→ **这 108 声进了两回账**。
+    //
+    // 第 3 卷 CloudKit 只同步到一半时够得着：草稿先到、定课后到。
+    let (rc, env, item) = try makeRecovery()
+    let now = Date()
+    let draft = try env.drafts.begin(itemID: item.id, source: .counter, at: now)
+    try env.drafts.update(draft, amount: 108, at: now)
+    try rc.runAtLaunch()
+    #expect(rc.pending.count == 1)
+
+    // 造出「草稿指着的功课当下查不到」：直接从库里抹掉那门课。
+    // 生产上 `PracticeItem` 只归档不硬删，这一步模拟的是同步尚未送达。
+    env.context.delete(item)
+    try env.context.save()
+
+    #expect(throws: RecoveryError.self) { try rc.accept(rc.pending[0]) }
+    #expect(rc.pending.count == 1, "报了错就得让他还能再点一次，不许把这一份丢掉")
+    #expect(try env.drafts.pendingDrafts().count == 1, "草稿一个字都不许动")
+}
+
+@MainActor
 @Test func 空草稿不打扰用户() throws {
     // 点开计数器又立刻退出会留下一份 amount 为 0 的草稿。
     let (rc, env, item) = try makeRecovery()

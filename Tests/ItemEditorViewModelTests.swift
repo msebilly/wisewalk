@@ -123,9 +123,12 @@ private func makeEditorEnv() throws -> (PracticeItemStore, DayLedger) {
                                 dailyGoal: 1000, iconName: "circle.grid.3x3",
                                 colorHex: Palette.Light.fulfilled)
     let plan = try ledger.plan(for: 20260701, activeItems: [item], dayStartHour: 0, timeZone: 北京时间)
-    let now = Date()
+    // 固定时刻 + 显式时区（纪律 ⑬）。`onDay:` 已经把落哪天钉死了，
+    // 所以裸 `Date()` 眼下不致错——但它在一条谈 dayKey 的测试里就是个陷阱，
+    // 下一个人把 `onDay:` 去掉时，断言会跟着开发机的时区一起漂。
+    let now = 北京(7, 1, 9, 0)
     try ledger.record(item: item, amount: 1000, source: .counter,
-                      startedAt: now, at: now, onDay: 20260701)
+                      startedAt: now, at: now, timeZone: 北京时间, onDay: 20260701)
     #expect(try ledger.fulfillment(of: item.id, plan: plan) == .fulfilled)
 
     let vm = ItemEditorViewModel(store: items, editing: item)

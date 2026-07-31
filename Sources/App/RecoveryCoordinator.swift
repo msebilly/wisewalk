@@ -22,6 +22,18 @@ struct PendingRecovery: Identifiable, Equatable {
     let endedAt: Date
 }
 
+enum RecoveryError: LocalizedError {
+    /// 草稿指着的那门功课当下查不到。第 3 卷同步只到一半时够得着。
+    case itemNotFound(name: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .itemNotFound(let name):
+            return "暂时找不到「\(name)」这门定课，这一笔还没记上。等资料同步好了再试一次。"
+        }
+    }
+}
+
 /// §4.5 第 3 条：启动时的草稿清算。
 ///
 /// **顺序即全部要害**：
@@ -148,10 +160,25 @@ final class RecoveryCoordinator {
     /// `timeZone` 仍留作参数：它没有对应的用户设置，`.current` 就是生产时的真值，
     /// 而测试必须能注入固定时区（否则断言的尺子和实现是同一把）。
     func accept(_ item: PendingRecovery, timeZone: TimeZone = .current) throws {
-        guard let draft = drafts[item.id],
-              let practiceItem = try env.items.item(id: item.itemID) else {
+        // 草稿不在手里了：这一份已经被处理过（同一份被点了两次、
+        // 或上一轮 commit 之后 UI 又回调了一次）。**静默放行是对的**——
+        // 该记的已经记了，再说什么都只会让人以为要记两笔。
+        guard let draft = drafts[item.id] else {
             pending.removeAll { $0.id == item.id }
             return
+        }
+        // ⛔ 但「查不到那门功课」完全是另一回事，**不许跟上面走同一条路**。
+        // 从前两个条件并在一个 guard 里，查不到功课时把这一份从 pending 里抹掉就返回:
+        // 用户按了「记上」，屏幕上弹窗消失、什么都没发生、一个字也没说。
+        // 而草稿还躺在盘上——
+        //
+        //   他以为没记上 → 照着记忆手动补记一遍 → 下次启动弹窗又问同一份 →
+        //   他再按一次「记上」→ **这 108 声进了两回账**。
+        //
+        // 静默的空操作在这里是「多」的源头，不是保守的那一侧。
+        // 抛出去让界面说话，pending **留着**，等同步补齐了还能再点一次。
+        guard let practiceItem = try env.items.item(id: item.itemID) else {
+            throw RecoveryError.itemNotFound(name: item.itemName)
         }
         _ = try env.drafts.commit(draft, item: practiceItem, amount: item.suggestedAmount,
                                   at: draft.updatedAt,
