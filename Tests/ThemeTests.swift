@@ -71,6 +71,20 @@ import SwiftUI
                                           measureType: .duration) == "25:00 / 30:00")
     #expect(FulfillmentBadge.progressText(total: 1500, goal: nil, unit: "",
                                           measureType: .duration) == "25:00")
+
+    // 用户定案：打坐按「时间」和「坐数量」两个数——45 分钟是一口气坐的
+    // 还是分三回凑的，一个数说不清。
+    #expect(FulfillmentBadge.progressText(total: 1500, goal: 1800, unit: "",
+                                          measureType: .duration, rounds: 3) == "25:00 / 30:00 · 3 坐")
+    #expect(FulfillmentBadge.progressText(total: 1500, goal: nil, unit: "",
+                                          measureType: .duration, rounds: 1) == "25:00 · 1 坐")
+    // 「0 坐」是噪声，圆环已经说明没做。
+    #expect(FulfillmentBadge.progressText(total: 0, goal: 1800, unit: "",
+                                          measureType: .duration, rounds: 0) == "0:00 / 30:00")
+    // 坐数只属于计时类。计数类给了 rounds 也不该冒出「· N 坐」——
+    // 念佛的「一坐」没有意义，串珠转了几圈不是修行的单位。
+    #expect(FulfillmentBadge.progressText(total: 500, goal: 1000, unit: "声",
+                                          measureType: .count, rounds: 3) == "500 / 1000 声")
     #expect(FulfillmentBadge.progressText(total: 1, goal: 1, unit: "",
                                           measureType: .check) == "已完成")
     #expect(FulfillmentBadge.progressText(total: 0, goal: 1, unit: "",

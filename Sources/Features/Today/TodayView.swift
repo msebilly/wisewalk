@@ -110,7 +110,8 @@ struct TodayView: View {
                     }
                     Text(FulfillmentBadge.progressText(total: row.total, goal: row.goal,
                                                        unit: row.unit,
-                                                       measureType: row.measureType))
+                                                       measureType: row.measureType,
+                                                       rounds: row.roundCount))
                         .font(.subheadline.monospacedDigit())
                         .foregroundStyle(theme.secondaryText)
                 }
@@ -127,7 +128,8 @@ struct TodayView: View {
             row.name,
             row.isArchived ? "已归档" : nil,
             FulfillmentBadge.progressText(total: row.total, goal: row.goal,
-                                          unit: row.unit, measureType: row.measureType),
+                                          unit: row.unit, measureType: row.measureType,
+                                          rounds: row.roundCount),
             FulfillmentBadge.text(for: row.state)
         ].compactMap { $0 }.joined(separator: "，")))
         .accessibilityAddTraits(.isButton)
