@@ -22,9 +22,27 @@ struct RootView: View {
         rc.didRun && rc.pending.isEmpty
     }
 
-    static func recoveryMessage(_ item: PendingRecovery) -> String {
+    /// **必须说出这笔算在哪天。**
+    ///
+    /// `accept` 把它记在功课发生的那天（`at: draft.updatedAt`），这是对的——
+    /// 可代价是：隔夜才重开 App 的用户按完「记上」，回到今日页会发现**什么都没变**。
+    /// 他刚认下的 108 声像是凭空消失了，于是照着记忆再补记一遍，就成了 216。
+    /// 「一声都不能多」在这里不是被一行代码破掉的，是被一句没说出口的话破掉的。
+    ///
+    /// 措辞只陈述事实、不判断是不是今天——同一天崩溃再重开也是常事，
+    /// 那时说「不算今天」就是撒谎。写出日期，用户自己认得出。
+    ///
+    /// `timeZone` 留作参数是为了测试能注入固定时区：本机是 PDT，
+    /// 拿 `.current` 去断言就是拿实现那把尺子量实现（纪律 ⑬）。
+    static func recoveryMessage(_ item: PendingRecovery,
+                                timeZone: TimeZone = .current) -> String {
         let kind = item.source == .timer ? "计时" : "计数"
-        return "上次「\(item.itemName)」\(kind)到 \(item.amountText) 时应用退出了，还没记上。要记上吗？"
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.timeZone = timeZone
+        f.dateFormat = "M月d日 HH:mm"
+        return "上次「\(item.itemName)」\(kind)到 \(item.amountText) 时应用退出了，还没记上。\n"
+            + "记上会算在 \(f.string(from: item.endedAt))，也就是当时那一天。"
     }
 
     var body: some View {
@@ -43,7 +61,7 @@ struct RootView: View {
             Button("记上") { accept() }
             Button("不记了", role: .destructive) { discard() }
         } message: {
-            Text(recovery.pending.first.map(Self.recoveryMessage) ?? "")
+            Text(recovery.pending.first.map { Self.recoveryMessage($0) } ?? "")
         }
         .alert("出了点问题", isPresented: .constant(failure != nil)) {
             Button("知道了") { failure = nil }

@@ -14,6 +14,12 @@ struct PendingRecovery: Identifiable, Equatable {
     let suggestedAmount: Int
     let amountText: String
     let startedAt: Date
+    /// 这一坐的**收坐时刻**，也就是草稿最后一次心跳落盘的时刻。
+    ///
+    /// 它不是给排序用的，是给用户看的：`accept` 拿它算这笔落在哪天
+    /// （`at: draft.updatedAt`），所以弹窗必须把它说出来。
+    /// 弹窗承诺的和 `accept` 做的，得是同一件事。
+    let endedAt: Date
 }
 
 /// §4.5 第 3 条：启动时的草稿清算。
@@ -84,7 +90,8 @@ final class RecoveryCoordinator {
                 source: draft.source,
                 suggestedAmount: amount,
                 amountText: text(amount, item: item),
-                startedAt: draft.startedAt
+                startedAt: draft.startedAt,
+                endedAt: draft.updatedAt
             ))
         }
 
