@@ -24,6 +24,13 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.msebilly.wisewalk
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: 慧行
+        # ⛔ 不声明语言的话，凡是**系统自己画**的东西全走英文：
+        # `EditButton()` 是 `Edit`、`DatePicker` 写 `Jul 31, 2026`、
+        # `.alert` 自动补的那个按钮叫 `Cancel`（那一个还会把界面点死，见 `postpone()`）。
+        # 自己写的文案再怎么斟酌也盖不住——同一屏上「7 月 31 日 星期五」
+        # 和 `Jul 31, 2026` 并排出现过。面向的是汉传佛教在家居士。
+        DEVELOPMENT_LANGUAGE: zh-Hans
+        INFOPLIST_KEY_CFBundleLocalizations: zh-Hans
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         CODE_SIGN_STYLE: Automatic
