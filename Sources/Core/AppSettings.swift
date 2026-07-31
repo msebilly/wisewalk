@@ -13,6 +13,7 @@ final class AppSettings {
     private enum Key {
         static let sound = "settings.soundEnabled"
         static let haptic = "settings.hapticEnabled"
+        static let qing = "settings.qingEnabled"
         static let dayStartHour = "settings.dayStartHour"
     }
 
@@ -24,13 +25,16 @@ final class AppSettings {
         // 所以首次运行时显式落一次盘，之后一律以盘上的值为准。
         if defaults.object(forKey: Key.sound) == nil { defaults.set(true, forKey: Key.sound) }
         if defaults.object(forKey: Key.haptic) == nil { defaults.set(true, forKey: Key.haptic) }
+        if defaults.object(forKey: Key.qing) == nil { defaults.set(true, forKey: Key.qing) }
         _soundEnabled = defaults.bool(forKey: Key.sound)
         _hapticEnabled = defaults.bool(forKey: Key.haptic)
+        _qingEnabled = defaults.bool(forKey: Key.qing)
         _dayStartHour = Self.clampHour(defaults.integer(forKey: Key.dayStartHour))
     }
 
     private var _soundEnabled: Bool
     private var _hapticEnabled: Bool
+    private var _qingEnabled: Bool
     private var _dayStartHour: Int
 
     var soundEnabled: Bool {
@@ -41,6 +45,24 @@ final class AppSettings {
     var hapticEnabled: Bool {
         get { _hapticEnabled }
         set { _hapticEnabled = newValue; defaults.set(newValue, forKey: Key.haptic) }
+    }
+
+    /// 倒计时到零时响引磬。§6.3.1。
+    ///
+    /// **独立于 `soundEnabled`**：念佛不想每声都响、但下坐要知道，是很合理的组合。
+    ///
+    /// ⚠️ 前台与后台走的是**两套声音通道**，音量归谁管都不一样，设置页必须写明：
+    /// 前台是 `AVAudioPlayer` + `.ambient`（**媒体音量**），
+    /// 后台是本地通知（**铃声音量**）。同一声引磬，锁屏时可能明显更响。
+    /// 这个不一致消不掉——通知声音归系统管，App 的 audio session 类目管不着它。
+    ///
+    /// 两条路都跟随物理静音键。**不做「静音也响」**：前台技术上做得到
+    /// （`.playback` + `mixWithOthers`），**后台做不到**——本地通知越过静音键要
+    /// Critical Alerts 权限，那是给医疗与安防类 App 的，我们申请不下来。
+    /// 那会得到一个只在前台成立的承诺，**半真的承诺比不承诺更坏**。
+    var qingEnabled: Bool {
+        get { _qingEnabled }
+        set { _qingEnabled = newValue; defaults.set(newValue, forKey: Key.qing) }
     }
 
     /// 一日从几点算起。允许推后几小时，为的是夜里十一点做完晚课的人——

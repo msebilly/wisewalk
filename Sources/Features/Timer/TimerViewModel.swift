@@ -65,6 +65,37 @@ final class TimerViewModel {
     /// 用户一眼就知道出事了，而账本此刻一秒都还没动。
     static let implausibleAfter: TimeInterval = 4 * 3600
 
+    /// 倒计时预设档位（秒）。§6.3.1 定案。
+    ///
+    /// **没有「一炷香」这一档。** 它的长度因寺院因香品而异，禅堂里从二十几分钟
+    /// 到近一小时都有，不像 108 那样有客观定数。给自己挑的分钟数贴上传统标签，
+    /// **那是编传统，跟编数是同一种罪**。档位一律用分钟数直呼。
+    ///
+    /// 上界卡在 `implausibleAfter` 之内——档位若能选到超过四小时，
+    /// 用户选了就必然被闸门拦下，那是自设陷阱。
+    static let countdownChoices = [300, 600, 900, 1200, 1500, 1800, 2700, 3600, 5400]
+
+    /// 倒计时秒数。`nil` = 正计时。
+    private(set) var countdownSeconds: Int?
+
+    /// **不封顶**的原始差值。只有四小时闸门读它。
+    ///
+    /// ⛔ 封顶后的 `elapsed` 分不出「坐了 30 分钟」和「早课忘按结束、晚上才打开」——
+    /// 两者读数都是 1800。闸门若看封顶值就永远不响，App 会静悄悄编一个 30 分钟出来。
+    private var rawElapsed: Int = 0
+
+    /// 倒计时是否已经到零。到零后走时钉死、心跳停摆。
+    var hasReachedZero: Bool {
+        guard let countdownSeconds else { return false }
+        return elapsed >= countdownSeconds
+    }
+
+    /// 起坐前设定倒计时。传 `nil` 回到正计时。
+    /// 计时中途改没有意义，界面只在未开始时开放它。
+    func setCountdown(_ seconds: Int?) {
+        countdownSeconds = seconds.map { max(1, $0) }
+    }
+
     private(set) var elapsed: Int = 0
     private(set) var isRunning = false
     /// 进入本轮之前，`committedDayKey` 那天这一项已经记进账本的秒数。
@@ -164,7 +195,14 @@ final class TimerViewModel {
         // 触发要同时满足「时钟回拨超过已计时长」，iOS 上的 NTP 校正都是亚秒级，
         // 够得上的只有用户手动改表。真要根治得换 `ContinuousClock` 并把已计秒数
         // 写进草稿的 `amount`（现在心跳只 `touch` 不写量）。**这一卷不做。**
-        elapsed = max(0, Int(now.timeIntervalSince(startedAt)))
+        rawElapsed = max(0, Int(now.timeIntervalSince(startedAt)))
+        // §6.3.1：到零就钉死，不再往上爬。用户 40 分钟后才回来按「记上」，
+        // 记的仍是他设的那 30 分钟——多出来的 10 分钟是编出来的。
+        if let countdownSeconds {
+            elapsed = min(rawElapsed, countdownSeconds)
+        } else {
+            elapsed = rawElapsed
+        }
     }
 
     /// 心跳：把「App 此刻还活着」写进草稿。到间隔才写，避免每秒一次写盘。
@@ -173,6 +211,10 @@ final class TimerViewModel {
     /// App 可能崩在三天前，用「现在」会给用户记上 72 小时的打坐。
     func heartbeatIfNeeded(at now: Date = Date()) throws {
         guard isRunning, let draft else { return }
+        // 到零之后 updatedAt 必须定格。照打的话，App 崩了之后
+        // `DraftRecovery.suggestedAmount` 按 `updatedAt − startedAt` 估，
+        // 会绕过封顶给出远超倒计时的数——从后门把「多」放进来。
+        guard !hasReachedZero else { return }
         guard now.timeIntervalSince(lastHeartbeat) >= Self.heartbeatInterval else { return }
         try drafts.touch(draft, at: now)
         lastHeartbeat = now
@@ -198,7 +240,7 @@ final class TimerViewModel {
             return nil
         }
 
-        guard TimeInterval(elapsed) <= Self.implausibleAfter else {
+        guard TimeInterval(rawElapsed) <= Self.implausibleAfter else {
             // 一个字段都不动、草稿原样留着。用户接下来可能填一个数走
             // `record(seconds:)`，也可能直接 `abandon()`；就算 App 这时候死了，
             // 草稿还在盘上，下次启动 `RecoveryCoordinator` 照样问得出来。
@@ -260,6 +302,7 @@ final class TimerViewModel {
         isRunning = false
         startedAt = nil
         elapsed = 0
+        rawElapsed = 0
     }
 
     /// 放弃本次：草稿与账本都不留痕。

@@ -391,3 +391,89 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int, _ s: Int = 0) -> D
     _ = try vm.finish(at: 北京(7, 28, 20, 30))
     #expect(vm.dayRounds == 2)
 }
+
+@MainActor
+@Test func 倒计时到零后走时封顶不再往上爬() throws {
+    let (vm, _, _, _, _) = try makeTimer()
+    let start = 北京(7, 28, 6, 0)
+    vm.setCountdown(1800)
+    try vm.start(at: start, timeZone: 北京时间)
+
+    vm.refresh(at: start.addingTimeInterval(1799))
+    #expect(vm.elapsed == 1799, "没到零之前照常走")
+
+    vm.refresh(at: start.addingTimeInterval(2400))
+    #expect(vm.elapsed == 1800, "§6.3.1：到零就钉死，人 10 分钟后才回来也只记 30 分钟")
+    #expect(vm.hasReachedZero)
+}
+
+@MainActor
+@Test func 到零之后按记上写的是倒计时那个数() throws {
+    // 用户设 30 分钟，40 分钟后才回来按「记上」——记的必须是 30 分钟。
+    let (vm, _, ledger, item, _) = try makeTimer()
+    let start = 北京(7, 28, 6, 0)
+    vm.setCountdown(1800)
+    try vm.start(at: start, timeZone: 北京时间)
+    let s = try vm.finish(at: start.addingTimeInterval(2400))
+    #expect(s?.amount == 1800, "多记的那 600 秒是编出来的")
+    #expect(try ledger.total(on: 20260728, itemID: item.id) == 1800)
+}
+
+@MainActor
+@Test func 倒计时不会让四小时闸门失灵() throws {
+    // ⛔ 本任务最危险的一处。封顶后 elapsed 恒为 1800，
+    // 闸门若看封顶值就永远不响，App 会给「早课忘按结束、晚上才打开」
+    // 静悄悄记上 30 分钟。闸门必须看原始差值。
+    let (vm, drafts, _, _, ctx) = try makeTimer()
+    let start = 北京(7, 28, 6, 0)
+    vm.setCountdown(1800)
+    try vm.start(at: start, timeZone: 北京时间)
+
+    #expect(throws: TimerViewModelError.self) {
+        _ = try vm.finish(at: start.addingTimeInterval(8 * 3600))
+    }
+    #expect(try 库里一条流水都没有(ctx), "拦住了就一秒都不许落账")
+    #expect(try drafts.pendingDrafts().count == 1, "草稿原样留着，等用户填实际时长")
+}
+
+@MainActor
+@Test func 到零之后不再打心跳() throws {
+    // 心跳若照打，updatedAt 会一直往前走；App 这时候崩了，
+    // DraftRecovery 按 updatedAt − startedAt 估，会绕过封顶给出远超倒计时的数。
+    let (vm, drafts, _, item, _) = try makeTimer()
+    let start = 北京(7, 28, 6, 0)
+    vm.setCountdown(60)
+    try vm.start(at: start, timeZone: 北京时间)
+
+    vm.refresh(at: start.addingTimeInterval(30))
+    try vm.heartbeatIfNeeded(at: start.addingTimeInterval(30))
+    let 到零前 = try drafts.draft(for: item.id)?.updatedAt
+
+    vm.refresh(at: start.addingTimeInterval(600))
+    try vm.heartbeatIfNeeded(at: start.addingTimeInterval(600))
+    #expect(try drafts.draft(for: item.id)?.updatedAt == 到零前,
+            "到零之后 updatedAt 必须定格")
+}
+
+@MainActor
+@Test func 正计时不受封顶影响() throws {
+    // countdown 为 nil 时行为必须与 Task 10 完全一致。
+    let (vm, _, _, _, _) = try makeTimer()
+    let start = 北京(7, 28, 6, 0)
+    try vm.start(at: start, timeZone: 北京时间)
+    vm.refresh(at: start.addingTimeInterval(7200))
+    #expect(vm.elapsed == 7200)
+    #expect(!vm.hasReachedZero, "正计时永远到不了零")
+}
+
+@MainActor
+@Test func 倒计时档位里没有一炷香() throws {
+    // §6.3.1：一炷香的长度因寺院因香品而异，没有 108 那样的客观定数。
+    // 给自己挑的分钟数贴传统标签是编传统。档位一律用分钟数直呼。
+    #expect(TimerViewModel.countdownChoices == [300, 600, 900, 1200, 1500, 1800, 2700, 3600, 5400])
+    #expect(TimerViewModel.countdownChoices.allSatisfy { $0 > 0 })
+    #expect(TimerViewModel.countdownChoices == TimerViewModel.countdownChoices.sorted())
+    #expect(TimerViewModel.countdownChoices.allSatisfy {
+        TimeInterval($0) <= TimerViewModel.implausibleAfter
+    }, "档位不许超过四小时闸门，否则选了就必然被拦")
+}

@@ -1,4 +1,6 @@
 import SwiftUI
+import AVFoundation
+import UIKit
 
 /// §6.3 计时器。
 ///
@@ -24,6 +26,17 @@ struct TimerView: View {
     @State private var correctHours = 0
     @State private var correctMinutes = 0
 
+    /// 是否已经起坐。未起坐时显示档位选择，起坐后显示走时。
+    @State private var started = false
+    /// 选中的倒计时秒数。`nil` = 不限时（正计时）。
+    @State private var chosenCountdown: Int?
+    /// 自定义时长选择器是否打开。
+    @State private var choosingCustom = false
+    @State private var customHours = 0
+    @State private var customMinutes = 30
+    /// 前台到零响引磬的播放器。**必须持有**：局部变量会在闭包结束时释放，声音随之截断。
+    @State private var qingPlayer: AVAudioPlayer?
+
     /// 短于这个数的一坐，返回时要问一句。
     ///
     /// 一分钟这个界不是随手定的：真坐的人不会只坐几十秒，而在今日页点错行、
@@ -35,24 +48,18 @@ struct TimerView: View {
     var body: some View {
         ZStack {
             theme.background
-            VStack(spacing: 12) {
-                Text(vm.clockText)
-                    .font(.system(size: 72, weight: .light, design: .rounded).monospacedDigit())
-                    .foregroundStyle(theme.primaryText)
-                Text(subtitle)
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(theme.secondaryText)
+            if started {
+                running
+            } else {
+                chooser
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .safeAreaInset(edge: .bottom) { controls }
+        .safeAreaInset(edge: .bottom) { bottomBar }
         .navigationTitle(vm.item.name)
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            do { try vm.start(dayStartHour: settings.dayStartHour) }
-            catch { failure = error.localizedDescription }
-        }
         .onReceive(tick) { now in
+            guard started else { return }
             vm.refresh(at: now)
             // 心跳每 10 秒落一次盘。**但这个 tick 一进后台就停**
             //（Timer.publish 在 .common 上也救不了挂起），所以「最坏少记 10 秒」
@@ -62,13 +69,20 @@ struct TimerView: View {
             do { try vm.heartbeatIfNeeded(at: now) }
             catch { failure = error.localizedDescription }
         }
+        // 前台到零响一声引磬，只在 false → true 那一次——别每秒 tick 都响。
+        // 账绝不依赖它：走时与入账全由 now − startedAt 现算，与响没响无关。
+        .onChange(of: vm.hasReachedZero) { wasZero, isZero in
+            guard !wasZero, isZero else { return }
+            ringQing()
+        }
         // 回到前台走一遍 start()，而不只是 refresh()。
         // 熄屏期间日子可能翻过去了，别的设备也可能同步进来一坐；
         // refresh() 只重算本轮秒数，committedTotal 还是熄屏前那个数。
         // start() 是幂等的（沿用同一份草稿、startedAt 从草稿读回来、
         // committedTotal 是赋值不是累加），拿它当 reload 正合适。
+        // **未起坐时不走**：否则回前台会把还在选档位的用户偷偷带进计时。
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
+            guard started, phase == .active else { return }
             do { try vm.start(dayStartHour: settings.dayStartHour) }
             catch { failure = error.localizedDescription }
         }
@@ -101,6 +115,83 @@ struct TimerView: View {
         .alert("出了点问题", isPresented: .constant(failure != nil)) {
             Button("知道了") { failure = nil }
         } message: { Text(failure ?? "") }
+    }
+
+    /// 走时与今日进度，起坐后显示。
+    private var running: some View {
+        VStack(spacing: 12) {
+            Text(vm.clockText)
+                .font(.system(size: 72, weight: .light, design: .rounded).monospacedDigit())
+                .foregroundStyle(theme.primaryText)
+            Text(subtitle)
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(theme.secondaryText)
+        }
+    }
+
+    /// 起坐前的倒计时档位选择。§6.3.1。
+    ///
+    /// **没有「一炷香」这一档**——见 `TimerViewModel.countdownChoices` 的注释。
+    private var chooser: some View {
+        Form {
+            Section {
+                ForEach(TimerViewModel.countdownChoices, id: \.self) { seconds in
+                    choiceRow(choiceLabel(seconds), selected: chosenCountdown == seconds) {
+                        chosenCountdown = seconds
+                    }
+                }
+                choiceRow("不限时", selected: chosenCountdown == nil) {
+                    chosenCountdown = nil
+                }
+                Button { choosingCustom = true } label: {
+                    HStack {
+                        Text("自定义")
+                            .foregroundStyle(theme.primaryText)
+                        Spacer()
+                        if isCustomSelection {
+                            Text(DurationFormat.spoken(chosenCountdown ?? 0))
+                                .foregroundStyle(theme.secondaryText)
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(theme.accent)
+                        }
+                    }
+                }
+            } header: {
+                Text("倒计时")
+            } footer: {
+                Text("到时响一声引磬提醒下坐。到零后走时钉在这里，不会替你多记一秒。")
+            }
+        }
+        .sheet(isPresented: $choosingCustom) { customSheet }
+    }
+
+    /// 底部主按钮：起坐后是「结束并记录」，起坐前是「开始」。
+    @ViewBuilder private var bottomBar: some View {
+        if started {
+            controls
+        } else {
+            Button {
+                vm.setCountdown(chosenCountdown)
+                do {
+                    try vm.start(dayStartHour: settings.dayStartHour)
+                    if let seconds = vm.countdownSeconds {
+                        QingScheduler.schedule(after: seconds, itemName: vm.item.name,
+                                               sound: settings.qingEnabled)
+                    }
+                } catch {
+                    failure = error.localizedDescription
+                    return
+                }
+                started = true
+            } label: {
+                Text(startTitle)
+                    .frame(maxWidth: .infinity, minHeight: 50)
+            }
+            .buttonStyle(.borderedProminent)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial)
+        }
     }
 
     /// 计时器读数过长时问用户实际坐了多久。
@@ -145,6 +236,7 @@ struct TimerView: View {
                             failure = error.localizedDescription
                             return
                         }
+                        QingScheduler.cancel()
                         onFinish()
                         dismiss()
                     }
@@ -152,6 +244,43 @@ struct TimerView: View {
                 }
             }
             .interactiveDismissDisabled()
+        }
+    }
+
+    /// 自定义倒计时时长。走与纠正读数相同的时分转盘。
+    private var customSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack(spacing: 0) {
+                        Picker("小时", selection: $customHours) {
+                            ForEach(0..<5, id: \.self) { Text("\($0) 小时").tag($0) }
+                        }
+                        Picker("分钟", selection: $customMinutes) {
+                            ForEach(0..<60, id: \.self) { Text("\($0) 分").tag($0) }
+                        }
+                    }
+                    .pickerStyle(.wheel)
+                } header: {
+                    Text("倒计时多久")
+                } footer: {
+                    Text("超过四小时会被当成忘按结束，选不了。")
+                }
+            }
+            .navigationTitle("自定义倒计时")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { choosingCustom = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("确定") {
+                        chosenCountdown = DurationField.seconds(hours: customHours, minutes: customMinutes)
+                        choosingCustom = false
+                    }
+                    .disabled(!customIsValid)
+                }
+            }
         }
     }
 
@@ -167,6 +296,42 @@ struct TimerView: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
         .background(.ultraThinMaterial)
+    }
+
+    /// 起坐按钮上的文字。选了倒计时就把时长报出来，没选就是「开始」。
+    private var startTitle: String {
+        guard let seconds = chosenCountdown else { return "开始" }
+        return "开始 · \(DurationFormat.spoken(seconds))"
+    }
+
+    /// 当前选中的是一个自定义值（既不是预设档位，也不是「不限时」）。
+    private var isCustomSelection: Bool {
+        guard let seconds = chosenCountdown else { return false }
+        return !TimerViewModel.countdownChoices.contains(seconds)
+    }
+
+    /// 自定义时长在闸门之内才可确定。四小时整可以，多一秒起坐必被拦。
+    private var customIsValid: Bool {
+        let seconds = DurationField.seconds(hours: customHours, minutes: customMinutes)
+        return seconds > 0 && TimeInterval(seconds) <= TimerViewModel.implausibleAfter
+    }
+
+    /// 档位文字。§6.3.1：一律用分钟数直呼，不贴「一炷香」这类编出来的标签。
+    private func choiceLabel(_ seconds: Int) -> String { DurationFormat.spoken(seconds) }
+
+    private func choiceRow(_ label: String, selected: Bool,
+                           _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Text(label)
+                    .foregroundStyle(theme.primaryText)
+                Spacer()
+                if selected {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(theme.accent)
+                }
+            }
+        }
     }
 
     /// 副标题：今日已记时长，外加**今天是第几坐**。
@@ -202,8 +367,23 @@ struct TimerView: View {
     private func abandonAndLeave() {
         do { try vm.abandon() }
         catch { failure = error.localizedDescription; return }
+        QingScheduler.cancel()
         onFinish()
         dismiss()
+    }
+
+    /// 前台到零响一声引磬，并同时震动。
+    ///
+    /// 前台走 `AVAudioPlayer` + `.ambient`：媒体音量、跟随物理静音键、且不掐断念佛机。
+    /// 震动是静音键拨上时**唯一**的信号，所以只要引磬功能开着就震——哪怕没出声。
+    private func ringQing() {
+        guard settings.qingEnabled else { return }
+        try? AVAudioSession.sharedInstance()
+            .setCategory(.ambient, mode: .default, options: [.mixWithOthers])
+        try? AVAudioSession.sharedInstance().setActive(true)
+        qingPlayer = try? AVAudioPlayer(data: QingSound.wavData())
+        qingPlayer?.play()
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
     }
 
     /// 记账。**成功才返回 true**，调用方据此决定要不要收页。
@@ -214,6 +394,7 @@ struct TimerView: View {
     private func commit() -> Bool {
         do {
             _ = try vm.finish()
+            QingScheduler.cancel()
             return true
         } catch TimerViewModelError.implausibleDuration(let seconds) {
             correctHours = 0

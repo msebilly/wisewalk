@@ -33,26 +33,6 @@ enum ClickSound {
             withUnsafeBytes(of: sample.littleEndian) { pcm.append(contentsOf: $0) }
         }
 
-        var data = Data()
-        func appendUInt32(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
-        func appendUInt16(_ v: UInt16) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
-
-        data.append(contentsOf: Array("RIFF".utf8))
-        appendUInt32(UInt32(36 + pcm.count))
-        data.append(contentsOf: Array("WAVE".utf8))
-
-        data.append(contentsOf: Array("fmt ".utf8))
-        appendUInt32(16)                                  // fmt 块长度
-        appendUInt16(1)                                   // PCM
-        appendUInt16(1)                                   // 单声道
-        appendUInt32(UInt32(sampleRate))
-        appendUInt32(UInt32(sampleRate * 2))              // 字节率 = 采样率 × 声道 × 位宽/8
-        appendUInt16(2)                                   // 块对齐
-        appendUInt16(16)                                  // 位深
-
-        data.append(contentsOf: Array("data".utf8))
-        appendUInt32(UInt32(pcm.count))
-        data.append(pcm)
-        return data
+        return WAVWriter.container(pcm: pcm, sampleRate: sampleRate)
     }
 }
