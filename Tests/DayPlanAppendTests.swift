@@ -147,6 +147,62 @@ private func 课(_ name: String, 立于 born: Date, 目标 goal: Int? = nil, 归
     #expect(Set(愈.requiredItemIDs) == Set(全.map(\.id)), "补回来的得正是这三门，不能只是凑够个数")
 }
 
+@Test @MainActor func 装上头一天立的第一门课当天就得能记() throws {
+    // ⛔ **这条是 2026-07-31 在模拟器里手点出来的，361 条测试全绿。**
+    //
+    // 新用户的必然路径，一步不多：
+    //   1. 装好 App 打开 → 今日页一露面就调 `plan` → 那天还没有快照 →
+    //      初次定格，收下「全部在册定课」＝ **空** → 落一条空快照
+    //   2. 他点「立一门定课」立了第一门 → `activatedAt` ＝ 今天
+    //   3. 回到今日页 → 那天**已有**快照 → 走 `appendLateArrivals` →
+    //      `activeSince < dayKey` 把今天立的挡在外面 → 今日页仍是空态
+    //
+    // 后果不是「圆满被夺」那一档，是**更基础的失败：他今天根本记不了**。
+    // 计数器和计时器的入口只在今日页的功课行上，行不出现就点不进去。
+    // 一个刚请回来的 App，头一天立的头一门课，当天不认。
+    //
+    // 现场证据（模拟器 SQLite）：空快照 15:52:35 定格，定课 15:57:18 立，差 4 分 43 秒。
+    //
+    // §5.6 那段注释写着「接受它，是因为初次定格只在该日尚无任何快照时触发，
+    // **那一刻没有圆满可夺**」——那句话本身对，但它把代价算小了：
+    // 那一刻确实没有圆满可夺（他一门课都没有），可代价不是圆满，是**当天的入口**。
+    //
+    // 判据只放宽在「已有快照全都是空的」这一处：
+    // 空快照说明定格那一刻他一门课都没有，那天没有任何圆满可言，
+    // 重新收全部在册定课不从任何人手里拿走东西——
+    // 与 `初次定格` 那个分支问的是同一句话，答案自然也该一样。
+    let (ledger, ctx) = try 建()
+
+    // 1. 今日页一露面，一门课都没有
+    let 空 = try ledger.plan(for: 20260728, activeItems: [], dayStartHour: 0, timeZone: 北京)
+    #expect(空.requiredItemIDs.isEmpty)
+
+    // 2. 他立了第一门课，就在今天
+    let 念佛 = 课("念佛", 立于: 时刻(7, 28, 10), 目标: 1000)
+    ctx.insert(念佛)
+
+    // 3. 回今日页
+    let 再 = try ledger.plan(for: 20260728, activeItems: [念佛], dayStartHour: 0, timeZone: 北京)
+    #expect(再.requiredItemIDs == [念佛.id], "头一天立的头一门课，今日页上必须有它")
+    #expect(再.goals[念佛.id.uuidString] == 1000, "目标也要跟着进来，否则圆满没有分母")
+}
+
+@Test @MainActor func 已经有课的那天新立的课仍旧不算今天() throws {
+    // 上一条只放宽「空快照」这一处，**不许顺手把不对称修平**。
+    // 已经有课的那天，下午新立一门课不能追加进来——
+    // 上午已经显示圆满的那半天会因此退回未圆满，那是替他改写已经过完的时间。
+    let (ledger, ctx) = try 建()
+    let 念佛 = 课("念佛", 立于: 时刻(7, 20, 9))
+    ctx.insert(念佛)
+    let 初 = try ledger.plan(for: 20260728, activeItems: [念佛], dayStartHour: 0, timeZone: 北京)
+    #expect(初.requiredItemIDs == [念佛.id])
+
+    let 打坐 = 课("打坐", 立于: 时刻(7, 28, 15))
+    ctx.insert(打坐)
+    let 后 = try ledger.plan(for: 20260728, activeItems: [念佛, 打坐], dayStartHour: 0, timeZone: 北京)
+    #expect(后.requiredItemIDs == [念佛.id], "那天已经有课了，今天下午新立的不算今天")
+}
+
 @Test @MainActor func 今天恢复的归档定课不会被追加进今天() throws {
     let (ledger, ctx) = try 建()
     let 念佛 = 课("念佛", 立于: 时刻(7, 20, 9))

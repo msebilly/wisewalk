@@ -399,8 +399,27 @@ final class DayLedger {
         timeZone: TimeZone
     ) throws -> DayPlan {
         let known = Set(existing.requiredItemIDs)
+
+        // ⛔ **那天的快照全是空的时候，`activatedAt` 判据一律不问。**
+        //
+        // 新用户的必然路径：装好 App 一打开，今日页立刻调 `plan`，那天还没快照，
+        // 于是「初次定格，收下全部在册定课」——而他此刻一门课都没有，落下一条空快照。
+        // 接着他点「立一门定课」，回今日页时那天**已经有**快照了，走到这里，
+        // 今天立的课被 `activeSince < dayKey` 挡在外面，今日页仍旧是空态。
+        // **计数器和计时器的入口只在今日页的功课行上，行不出现，他今天就记不了。**
+        //
+        // 2026-07-31 在模拟器里手点出来的，当时 361 条测试全绿：
+        // 空快照 15:52:35 定格，第一门课 15:57:18 立，差 4 分 43 秒。
+        //
+        // 为什么只放宽这一处：空快照说明定格那一刻他一门课都没有，
+        // **那天没有任何圆满可言，重新收下全部在册定课不从任何人手里拿走东西**。
+        // 这与上面 `plan` 的初次定格分支问的是同一句话（「此刻他想做哪些课」），
+        // 答案自然也该一样。已经有课的那天照旧挡住——那才是「替他改写已经过完的半天」。
+        let 那天还是空的 = known.isEmpty
+
         let late = activeItems.filter { item in
             guard !item.isArchived, !known.contains(item.id) else { return false }
+            if 那天还是空的 { return true }
             let activeSince = DayKey.make(
                 from: item.activatedAt,
                 tzOffsetMinutes: DayKey.currentOffsetMinutes(at: item.activatedAt, timeZone: timeZone),
