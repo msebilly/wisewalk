@@ -351,3 +351,78 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
                       startedAt: now, at: now, timeZone: 北京时间)
     #expect(!ctx.hasChanges, "record 应当已经落盘，不该留下未保存的改动")
 }
+
+@MainActor
+@Test func 两台设备各撤一次同一笔只扣一次() throws {
+    // §5.7。离线时两台设备各撤销同一笔 500，各自查本地都查不到那个幂等键，
+    // 于是各建一笔 amount −500、note 同为 "revoke:<同一个 id>"、**但 UUID 不同**
+    // 的调整流水。CloudKit 合并后两笔都在库里，就是下面手工造出来的样子。
+    //
+    // 不去重的话：+500 +300 −500 −500 = −200，`total` clamp 成 0，
+    // 用户看到「今天 0 声」——他真念的那 300 声就这么没了，**账面上还看不出哪儿错**。
+    // 方向是「丢」，且是最难察觉的一种：没有任何提示，数字只是变小了。
+    //
+    // 造两条同 note 不同 UUID 的记录直接 insert，不必等真容器。
+    let (ledger, ctx, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+    let 五百 = try ledger.record(item: item, amount: 500, source: .counter,
+                               startedAt: now, endedAt: now, at: now, timeZone: 北京时间)
+    _ = try ledger.record(item: item, amount: 300, source: .counter,
+                          startedAt: now, endedAt: now, at: now, timeZone: 北京时间)
+
+    // 本机撤一次
+    _ = try ledger.revoke(五百, at: now, timeZone: 北京时间)
+    // 另一台设备离线时也撤了同一笔，同步过来
+    let 远端那笔 = PracticeSession(
+        item: item, dayKey: 五百.dayKey, tzOffsetMinutes: 五百.tzOffsetMinutes,
+        amount: -500, startedAt: now, endedAt: now, source: .adjustment,
+        deviceName: "iPad·别人", note: "revoke:\(五百.id.uuidString)", createdAt: now
+    )
+    ctx.insert(远端那笔)
+    try ctx.save()
+
+    #expect(try ledger.rawTotal(on: 20260728, itemID: item.id) == 300,
+            "同一笔只该被撤一次：500 + 300 − 500 = 300")
+    #expect(try ledger.total(on: 20260728, itemID: item.id) == 300,
+            "他真念的那 300 声不能被 clamp 掩盖成 0")
+}
+
+@MainActor
+@Test func 撤不同的两笔各扣各的() throws {
+    // 去重的键是**完整 note 字符串**，不是「note 非空」也不是「同 item 同 amount」。
+    // 写松一档就会把两笔撤销塌成一笔——那 500 声凭空回来了，方向是「多」。
+    let (ledger, _, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+    let a = try ledger.record(item: item, amount: 500, source: .counter,
+                              startedAt: now, endedAt: now, at: now, timeZone: 北京时间)
+    let b = try ledger.record(item: item, amount: 500, source: .counter,
+                              startedAt: now, endedAt: now, at: now, timeZone: 北京时间)
+    _ = try ledger.revoke(a, at: now, timeZone: 北京时间)
+    _ = try ledger.revoke(b, at: now, timeZone: 北京时间)
+
+    #expect(try ledger.rawTotal(on: 20260728, itemID: item.id) == 0,
+            "两笔各撤各的，金额一样也不是同一组")
+}
+
+@MainActor
+@Test func 重复的撤销笔在流水里也只出现一次() throws {
+    // 补记页那列流水读的也是 sessions()。重复那笔留在列表里，
+    // 用户会看见两条一模一样的「撤销 −500」，以为自己手滑撤了两次，
+    // 转头就去补记页把 500 补回来——那才是真的多记。
+    let (ledger, ctx, item) = try makeLedger()
+    let now = 北京(7, 28, 9, 0)
+    let 五百 = try ledger.record(item: item, amount: 500, source: .counter,
+                               startedAt: now, endedAt: now, at: now, timeZone: 北京时间)
+    _ = try ledger.revoke(五百, at: now, timeZone: 北京时间)
+    ctx.insert(PracticeSession(
+        item: item, dayKey: 五百.dayKey, tzOffsetMinutes: 五百.tzOffsetMinutes,
+        amount: -500, startedAt: now, endedAt: now, source: .adjustment,
+        deviceName: "iPad·别人", note: "revoke:\(五百.id.uuidString)", createdAt: now
+    ))
+    try ctx.save()
+
+    let rows = try ledger.sessions(on: 20260728, itemID: item.id)
+    #expect(rows.filter { $0.source == .adjustment }.count == 1,
+            "同一笔的两条撤销在列表里只该出现一条")
+    #expect(rows.count == 2, "原记录 + 一条撤销")
+}

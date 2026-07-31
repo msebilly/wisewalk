@@ -181,7 +181,50 @@ final class DayLedger {
         let sameDay = try context.fetch(
             FetchDescriptor<PracticeSession>(predicate: #Predicate { $0.dayKey == key })
         )
-        return sameDay.filter { $0.item?.id == itemID }
+        return Self.dedupedRevocations(sameDay.filter { $0.item?.id == itemID })
+    }
+
+    /// §5.7：把「多台设备各撤了同一笔」合并回一笔。
+    ///
+    /// `revoke` 的幂等键是 `note` 里的 `revoke:<原记录 id>`，可它**只查本机库**。
+    /// 两台设备离线各撤同一笔 500，各自都查不到 → 各建一条 `amount: −500`、
+    /// note 相同、**UUID 不同**的调整流水。CloudKit 合并后两条都在，于是
+    /// `+500 +300 −500 −500 = −200`，`displayTotal` clamp 成 0，用户看到「今天 0 声」——
+    /// 他真念的那 300 声就这么没了，**账面上还看不出哪儿错**。
+    /// 方向是「丢」，且是最难察觉的一种：没有提示，数字只是变小了。
+    ///
+    /// 为什么不在写侧堵：那要靠「确定性 UUID + 框架把两条合成一条」，而
+    /// **CloudKit 用不了 `@Attribute(.unique)`**（见 design-spec §5.2）。没有唯一约束，
+    /// 两台设备各写一条就永远是两条。「事后清理一次」也不成立——只要还有第三台设备
+    /// 可能上线补一条，清理就永远做不完。读侧去重是幂等的，任何时刻算出来都对。
+    ///
+    /// **收在这里，是因为 `total` / `rawTotal` / `roundCount` / 补记页流水全从这儿过。**
+    /// 去重若分散写进每个读者，漏一个就是一处永久错账；第 2 卷有七次实测证据说明
+    /// 「要说两遍的话，早晚有一处说错」。
+    ///
+    /// ⚠️ **分组键是「`revoke:` 前缀」+「完整 note 字符串」两个条件缺一不可。**
+    /// 眼下 `revoke` 是全仓库唯一写 `.adjustment` 的地方、note 全带这个前缀，
+    /// 所以「note 相同」看着等价；哪天有人加了第二个 `.adjustment` 写入口而 note 留空，
+    /// 「note 相同」就会把**一整批不相干的调整塌成一条**。方向是「多」，量级不封顶。
+    ///
+    /// 「撤销那次撤销」不会被误伤：那一笔的 note 是 `revoke:<调整笔自己的 id>`，
+    /// 与被它撤销的那笔不同组。（该路径今天还不存在——`ManualEntryView` 不给撤销行
+    /// 配撤销按钮——但规则先站得住。）
+    ///
+    /// 保留哪一条按 `(createdAt, id.uuidString)` 定，让各设备显示同一条；
+    /// 重复两笔 `amount` 本就相同，总数取哪条都对，这只为列表不看着像数据不一致。
+    static func dedupedRevocations(_ sessions: [PracticeSession]) -> [PracticeSession] {
+        var seen = Set<String>()
+        var dropped = Set<UUID>()
+        for s in sessions.sorted(by: {
+            ($0.createdAt, $0.id.uuidString) < ($1.createdAt, $1.id.uuidString)
+        }) {
+            guard s.source == .adjustment,
+                  let note = s.note, note.hasPrefix("revoke:") else { continue }
+            if !seen.insert(note).inserted { dropped.insert(s.id) }
+        }
+        guard !dropped.isEmpty else { return sessions }
+        return sessions.filter { !dropped.contains($0.id) }
     }
 
     /// 某天某项的显示总数（负数已 clamp 到 0）。
