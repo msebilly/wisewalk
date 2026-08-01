@@ -277,17 +277,23 @@ struct MigrationSheet: View {
                         if isDuration {
                             // ⛔ **不能照抄补记页的 24 小时转盘。** 这里装的是他一辈子的功课，
                             // 「打坐累计三千小时」是很正常的一个数，转盘转不到。
+                            //
+                            // 旁边那两个「小时」「分」是独立的 `Text`，读屏软件不会把它们
+                            // 和框关联起来——不写 label，VoiceOver 念到这儿只有孤零零一个
+                            // 「0」，用户不知道该往哪个填。面向老居士的 App 尤其不能这样。
                             TextField("0", text: $hours.numericText)
                                 .keyboardType(.numberPad)
                                 .multilineTextAlignment(.trailing)
                                 .font(.body.monospacedDigit())
                                 .frame(maxWidth: 90)
+                                .accessibilityLabel("小时")
                             Text("小时")
                             TextField("0", text: $minutes.numericText)
                                 .keyboardType(.numberPad)
                                 .multilineTextAlignment(.trailing)
                                 .font(.body.monospacedDigit())
                                 .frame(maxWidth: 50)
+                                .accessibilityLabel("分钟")
                             Text("分")
                         } else {
                             TextField("0", text: $vm.amount.numericText)
@@ -295,6 +301,7 @@ struct MigrationSheet: View {
                                 .multilineTextAlignment(.trailing)
                                 .font(.body.monospacedDigit())
                                 .frame(maxWidth: 140)
+                                .accessibilityLabel("以往累计")
                         }
                     }
                 } footer: {
