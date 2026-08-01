@@ -141,8 +141,24 @@ struct RootView: View {
     /// 弹窗开关只在这一处拨。读的是 `pending`，所以三种收场各归各位：
     /// 还剩一份就接着问（两份草稿一份一份来）、问完了就放行、
     /// `accept()` 抛错留着的那份会被**重新**支起来。
+    ///
+    /// ⛔ **必须先落回 `false` 再支起来，中间隔一个 runloop。**
+    /// SwiftUI 是在按钮 action 跑完之后才把 alert 收掉的。若此刻把
+    /// `showRecovery` 从 `true` 又写成 `true`，那**不算一次状态变化**——
+    /// 弹窗不会重新呈现，而 `.disabled(!isReady)` 还锁着（`pending` 非空），
+    /// 于是屏上遮罩不散、哪儿都点不动，跟从前那个只读 binding 死得一模一样。
+    /// 手点两份草稿实测过：答完第一份，第二份不弹，界面当场锁死。
     private func syncRecoveryPrompt() {
-        showRecovery = !recovery.pending.isEmpty
+        showRecovery = false
+        guard !recovery.pending.isEmpty else { return }
+        Task { @MainActor in
+            // 等的是 UIKit 那套 alert 的关闭动画。`Task` 单靠调度让不出这段时间，
+            // 实测第二份照样弹不出来、界面照样锁死，必须真的隔开。
+            // 停顿本身也不坏：两份草稿之间空一下，用户才看得出这是**两笔**，
+            // 而不是一笔弹窗闪了两下。
+            try? await Task.sleep(for: .milliseconds(450))
+            showRecovery = true
+        }
     }
 
     private func accept() {
