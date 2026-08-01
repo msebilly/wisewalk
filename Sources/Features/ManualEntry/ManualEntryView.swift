@@ -327,6 +327,7 @@ struct MigrationSheet: View {
                     }
                 }
             }
+            .pageBackground()
             .navigationTitle("记入以往的累计")
             .navigationBarTitleDisplayMode(.inline)
             // ⛔ 这张表和补记表单共用同一个 `vm`，**每个可变字段都得进出各擦一次**。

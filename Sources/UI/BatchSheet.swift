@@ -51,6 +51,7 @@ struct BatchSheet: View {
                 .buttonStyle(.borderedProminent)
             }
             .padding(20)
+            .pageBackground()
             .navigationTitle("批量增加")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

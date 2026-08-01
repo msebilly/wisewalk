@@ -33,7 +33,21 @@ struct ItemListView: View {
                 Text("我的定课")
             } footer: {
                 if active.isEmpty {
-                    Text("随分随力，先立一样。")
+                    // ⛔ 从今日页「立一门定课」点过来的人，落到的就是这一页。
+                    // 从前这里只有同一句「随分随力，先立一样。」再说一遍，**没有按钮**——
+                    // 他刚点了一个写着「立一门定课」的按钮，换来的是同一句话和一个
+                    // 得自己找的右上角 `+`。引导在这儿断了。
+                    //
+                    // 给的是「从模板选一样」而不是「自定义」：头一回立课的人
+                    // 还不知道该填什么单位、多少数目，模板是更稳的起点。
+                    // 想自定义的人照旧走右上角，那条路一个字没动。
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("随分随力，先立一样。")
+                        Button("从模板选一样") { showTemplates = true }
+                            .buttonStyle(.borderedProminent)
+                            .font(.subheadline)
+                    }
+                    .padding(.top, 6)
                 }
             }
 
@@ -159,6 +173,7 @@ struct TemplatePickerSheet: View {
                     }
                 }
             }
+            .pageBackground()
             .navigationTitle("从模板新建")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

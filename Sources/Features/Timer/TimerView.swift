@@ -241,6 +241,12 @@ struct TimerView: View {
                     Text("计时器上是 \(DurationFormat.spoken(implausibleReading))，多半是忘了按结束。填多少就记多少，这个数不会替你猜。")
                 }
             }
+            // §6.2 的暖底一直没盖到 sheet 上：实测模板 sheet 底是 (242,242,247)
+            // 也就是系统 `#F2F2F7`，而全 App 的底是 `#FAF7F0` (250,247,240)——
+            // **一个偏蓝一个偏黄，冷暖是反的**，翻到这一页突然凉一下。
+            // 挂在 Form/List 上而不是 NavigationStack 外面：后者自己画一层不透明系统底，
+            // 挂外面会被它整个盖住。
+            .pageBackground()
             .navigationTitle("这一坐记多少")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -291,6 +297,7 @@ struct TimerView: View {
                     Text("超过四小时会被当成忘按结束，选不了。")
                 }
             }
+            .pageBackground()
             .navigationTitle("自定义倒计时")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
