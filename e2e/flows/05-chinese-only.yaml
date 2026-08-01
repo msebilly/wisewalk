@@ -1,0 +1,18 @@
+# 面向大陆居士的界面里不许冒英文。
+#
+# 守的是 `35e8117`：`project.yml` 从没声明过这个 App 说中文，
+# `CFBundleDevelopmentRegion` 默认 `en`，于是 `Edit`、`Cancel`、
+# `Jul 31, 2026` 三处照系统语言出英文——而补记页那句
+# 「这一天的记录 · 记错了在这里改」和 `Jul 31, 2026` 是同屏的。
+appId: com.msebilly.wisewalk
+---
+- runFlow: subflows/new-count-item.yaml
+- tapOn: { point: "90%,10%" }
+- assertVisible: "编辑"
+- assertNotVisible: "Edit"
+- tapOn: { point: "10%,10%" }
+- tapOn: { point: "10%,10%" }
+- assertVisible: "补记"
+- assertNotVisible: "Cancel"
+# 日期得是「2026年7月31日」那种说法，不是 `Jul 31, 2026`。
+- assertVisible: ".*年.*月.*日.*"

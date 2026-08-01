@@ -1,0 +1,19 @@
+# 点 20 下，就是 20 声。**一声不多，一声不少。**
+#
+# 这是整个 App 的立身之本，也是唯一一条「测试全绿也不敢信」的断言——
+# 计数器的加法在视图层，`committedTotal` 与草稿的接缝也在视图层。
+appId: com.msebilly.wisewalk
+---
+- runFlow: subflows/new-count-item.yaml
+- tapOn: "念佛"
+- repeat:
+    times: 20
+    commands:
+      - tapOn: { point: "50%,45%" }
+# 走用户真实的出口。**不要点返回箭头的坐标**——那个圆按钮比看着小，
+# `10%,10%` 落在它外面，点了不返回，而 flow 照样报 COMPLETED。
+- tapOn: "结束并记录"
+- assertVisible: "20 声"
+# 再进去一次，必须**从 20 接着数**，不是从 0 重来（`committedTotal` 那条接缝）。
+- tapOn: "念佛"
+- assertVisible: "20"

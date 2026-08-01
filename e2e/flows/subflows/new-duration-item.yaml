@@ -1,0 +1,9 @@
+# 清一遍再立一门计时类的课（打坐）。计时类是 3600 倍那条 bug 的舞台。
+appId: com.msebilly.wisewalk
+---
+- launchApp: { clearState: true }
+- tapOn: "立一门定课"
+- tapOn: "从模板选一样"
+- tapOn: "打坐"
+- tapOn: { point: "10%,10%" }
+- assertVisible: "打坐"

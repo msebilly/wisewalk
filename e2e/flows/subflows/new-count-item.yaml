@@ -1,0 +1,11 @@
+# 清一遍再立一门计数类的课（念佛）。
+# 每条 flow 都从这里起步——flow 之间**不许有状态依赖**：
+# 03 会 `stopApp` 留下草稿，沿用状态的话后面几条全被它的恢复弹窗挡住。
+appId: com.msebilly.wisewalk
+---
+- launchApp: { clearState: true }
+- tapOn: "立一门定课"
+- tapOn: "从模板选一样"
+- tapOn: "念佛"
+- tapOn: { point: "10%,10%" }
+- assertVisible: "念佛"
