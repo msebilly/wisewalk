@@ -52,3 +52,33 @@ enum DurationField {
         max(0, hours) * 3600 + max(0, minutes) * 60
     }
 }
+
+/// 「这门课的数量该怎么问」——**全 App 只有这一处答案**。
+///
+/// 立这个类型是因为 Step 12 点出的一条 3600 倍丢账：补记页对计时类问了时+分，
+/// 迁移页却问了一个裸数字框，而 `amount` 对计时类是**秒**。用户填「5000」
+/// 想说五千小时，记进去是 5000 秒。
+///
+/// 病根不是迁移页忘了补转盘，是**这个判断当时散在两个视图各写了一遍**：
+/// 一处 `vm.selectedItem?.measureType == .duration`，另一处压根没写。
+/// 散着写就必然有第三处、第四处，而每一处漏掉都是同一个 3600 倍。
+/// 所以答案收在这里，视图只许来问，不许自己判断。
+///
+/// ⚠️ 这个 enum 守得住「问法从哪来」，**守不住「视图真的去问了没有」**——
+/// 后者是 SwiftUI 的 body，单元测试够不着，靠 `e2e/` 里的 Maestro flow 盯。
+enum AmountInputStyle: CaseIterable {
+    /// 一个数字框。计数类（多少声）与打卡类（做了就是 1）。
+    case number
+    /// 时 + 分两个字段。计时类——**绝不能退回数字框，那等于在问秒**。
+    case duration
+
+    static func forMeasure(_ measure: MeasureType?) -> AmountInputStyle {
+        // ⛔ 不许写 `default:`。新加一个 measureType 时，编译器必须在这里拦住人，
+        // 而不是让它静默按数字问——若那个新类型也是时间量纲，就是 3600 倍重演。
+        switch measure {
+        case .duration: return .duration
+        case .count, .check: return .number
+        case nil: return .number
+        }
+    }
+}

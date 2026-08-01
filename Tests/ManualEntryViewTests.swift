@@ -180,3 +180,42 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     绑.numericText.wrappedValue = "99999999999999999999"
     #expect(值 == 123, "撑爆 Int 时保住上一个有效值，不许悄悄归零")
 }
+
+@Test func 问以往累计和问补记用的必须是同一套问法() {
+    // ⛔ 这条也是**手点模拟器点出来的**，当时 365 条全绿。
+    //
+    // 补记页对计时类做对了（时 + 分两个转盘），迁移页却是一个裸的数字框——
+    // **同一个 App 里两套问法**。而 `amount` 对计时类是【秒】：
+    //
+    //   打坐三十年，以往累计 5000 小时，他在框里输 5000
+    //   → 记成 5000 秒 = 1 小时 23 分
+    //   → **丢掉 3599/3600，他三十年的功课只剩一个零头**
+    //
+    // 方向是「丢」，量级是 3600 倍，而且**必然发生**——没有第二种读法：
+    // 框上只写「以往累计」，没有任何地方告诉他这里要填秒。
+    //
+    // 更狠的是这一笔的处境：注脚白纸黑字写着「只需做一次」，
+    // 而 `submitMigrationTotal` 只是套了个备注的普通 `submit`，**不幂等**。
+    // 他信了「做一次」，做错了；发现不对再来一次，是**叠加不是覆盖**。
+    //
+    // 修法不是给迁移页也补一套转盘——补一套就还是两套，下次改一处又漏一处。
+    // 是把「这门课的数量该怎么问」收成**一个函数**，两处都问它。
+    #expect(AmountInputStyle.forMeasure(.duration) == .duration,
+            "计时类必须按时分问；问裸数字就是问秒，而没人会填秒")
+    #expect(AmountInputStyle.forMeasure(.count) == .number)
+    #expect(AmountInputStyle.forMeasure(.check) == .number)
+    #expect(AmountInputStyle.forMeasure(nil) == .number, "还没选课时先给个安全的默认")
+
+    // **不许 `default:` 兜底。** 兜底分支会让日后新加的 measureType 静默按数字问，
+    // 而如果那个新类型也是时间量纲，就是同一条 3600 倍在别处重演一遍。
+    for m in MeasureType.allCases {
+        #expect(AmountInputStyle.allCases.contains(AmountInputStyle.forMeasure(m)),
+                "\(m) 没有明确归属")
+    }
+
+    // 迁移场景的数字比日常大两三个量级，得确认这一路不溢出也不丢精度：
+    // 5000 小时 = 1800 万秒，离 Int 的天花板远得很，但值得钉一下。
+    let 五千小时 = DurationField.seconds(hours: 5000, minutes: 0)
+    #expect(五千小时 == 18_000_000)
+    #expect(DurationField.split(seconds: 五千小时).hours == 5000, "来回一趟不许丢")
+}

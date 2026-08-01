@@ -65,7 +65,11 @@ struct ManualEntryView: View {
     @State private var failure: String?
     @State private var toast: String?
 
-    private var isDuration: Bool { vm.selectedItem?.measureType == .duration }
+    // 不自己判断「是不是计时类」——去问 `AmountInputStyle`。
+    // 从前这一句是本页私有的，而迁移页压根没写这一句，于是那边问出了裸秒（3600 倍）。
+    private var isDuration: Bool {
+        AmountInputStyle.forMeasure(vm.selectedItem?.measureType) == .duration
+    }
     private var today: Int { DayKey.today(dayStartHour: settings.dayStartHour) }
 
     var body: some View {
@@ -250,6 +254,13 @@ struct MigrationSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var failure: String?
+    /// 计时类专用。见下面 `isDuration` 那一段。
+    @State private var hours = 0
+    @State private var minutes = 0
+
+    private var isDuration: Bool {
+        AmountInputStyle.forMeasure(vm.selectedItem?.measureType) == .duration
+    }
 
     var body: some View {
         NavigationStack {
@@ -263,11 +274,28 @@ struct MigrationSheet: View {
                     HStack {
                         Text("以往累计")
                         Spacer()
-                        TextField("0", text: $vm.amount.numericText)
-                            .keyboardType(.numberPad)
-                            .multilineTextAlignment(.trailing)
-                            .font(.body.monospacedDigit())
-                            .frame(maxWidth: 140)
+                        if isDuration {
+                            // ⛔ **不能照抄补记页的 24 小时转盘。** 这里装的是他一辈子的功课，
+                            // 「打坐累计三千小时」是很正常的一个数，转盘转不到。
+                            TextField("0", text: $hours.numericText)
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                                .font(.body.monospacedDigit())
+                                .frame(maxWidth: 90)
+                            Text("小时")
+                            TextField("0", text: $minutes.numericText)
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                                .font(.body.monospacedDigit())
+                                .frame(maxWidth: 50)
+                            Text("分")
+                        } else {
+                            TextField("0", text: $vm.amount.numericText)
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                                .font(.body.monospacedDigit())
+                                .frame(maxWidth: 140)
+                        }
                     }
                 } footer: {
                     Text("会记成一笔单独的账，注明是以往累计，不会与日后的功课混在一起。只需做一次。")
@@ -280,7 +308,26 @@ struct MigrationSheet: View {
             // 散着写就得说好几遍，而第一版正是这么写的，于是擦了 `amount`、
             // 漏了 `selectedItem`：用户在补记页选好「念佛」，进来改选「持咒」再按取消，
             // 退回去选择器停在「持咒」，一点「记上」这笔就记到持咒头上。
-            .onAppear { vm.beginMigration() }
+            .onAppear {
+                vm.beginMigration()
+                hours = 0
+                minutes = 0
+            }
+            // ⛔ 转盘的值**只能从这里推进 `vm.amount`**，绝不能在 `body` 里写——
+            // 下面「记上」的 `.disabled(!vm.canSubmit())` 会在同一趟 `body` 里读它，
+            // 而 `@Observable` 的 setter 不比较新旧值，写进去就发通知：
+            // 写 → 失效 → 重绘 → 再写，选中打坐这张表就卡死了。
+            // 补记页为这一条踩过一次坑，注释在 `canSubmit` 上面。
+            .onChange(of: hours) { _, _ in syncDial() }
+            .onChange(of: minutes) { _, _ in syncDial() }
+            .onChange(of: vm.selectedItem?.id) { _, _ in
+                // 换了功课就清空。不清的话，在「打坐」填了 3000（小时→秒是 1080 万）
+                // 改选「念佛」，这个数会原样留在 `vm.amount` 里，
+                // 一点「记上」就是**一千零八十万声**。语义变了，数就不能留。
+                vm.amount = 0
+                hours = 0
+                minutes = 0
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { vm.endMigration(); dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
@@ -293,6 +340,11 @@ struct MigrationSheet: View {
             } message: { Text(failure ?? "") }
         }
         .presentationDetents([.medium])
+    }
+
+    private func syncDial() {
+        guard isDuration else { return }
+        vm.amount = DurationField.seconds(hours: hours, minutes: minutes)
     }
 
     private func submit() {
