@@ -31,6 +31,23 @@ struct TodayView: View {
                             .foregroundStyle(theme.secondaryText)
                     }
                 }
+                // 今天新立的课今天用不了——**这件事必须说出来**。
+                // 他 17:02 立了打坐回来看不见，分不清是「明天才算」还是「没存上」，
+                // 而后一种解释会让他再立一遍，于是有了两门重名的课。
+                //
+                // 放在 `isRestDay` 判断**之外**：眼下休息日不可能有「明天起算」的课
+                //（空快照会走追加路径），但这句话哪天真该出现时不该因为分支放错而消失。
+                if !vm.startingTomorrow.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("「\(vm.startingTomorrow.joined(separator: "、"))」从明天开始记")
+                            .font(.subheadline)
+                            .foregroundStyle(theme.primaryText)
+                        Text("今天的清单已经定下了，中途新立的课不改今天的账。")
+                            .font(.footnote)
+                            .foregroundStyle(theme.secondaryText)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             .padding(.horizontal, 20)
             .padding(.top, 8)

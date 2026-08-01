@@ -312,3 +312,45 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     let snapshots = try ctx.fetch(FetchDescriptor<DaySnapshot>())
     #expect(snapshots.count == 1, "同一天只该有一条本机生成的快照，实际 \(snapshots.count)")
 }
+
+@MainActor
+@Test func 今天新立的课今天用不了这件事得说出来() throws {
+    // ⛔ **这条是手点模拟器点出来的，行为本身是对的，缺的是一句话。**
+    //
+    // 17:02 立了「打坐」，回今日页——**看不见它**，进不去计时器，今天记不了。
+    // 这是 `appendLateArrivals` 明确不许修平的那个不对称（守卫测试
+    // `已经有课的那天新立的课仍旧不算今天` 钉着它）：上午已经显示出来的圆满
+    // 不能因为下午加了一门课就退回未圆满，那是替他改写已经过完的半天。
+    //
+    // 设计是对的。**但屏幕上一个字都没说。**
+    // 他看到的是：立了一门课，回来没有。他分不清这是「明天才算」还是
+    // 「刚才没存上」——而后一种解释会让他再立一遍，于是有了两门重名的课。
+    //
+    // 「一声都不能丢」这条线上还有一句没写出来的：**用户得知道自己的东西在哪儿。**
+    let env = try AppEnvironment(container: ModelContainerFactory.inMemory(),
+                                 defaults: UserDefaults(suiteName: "test.\(UUID().uuidString)")!)
+    let vm = TodayViewModel(ledger: env.ledger, items: env.items)
+
+    let 念佛 = try env.items.create(name: "念佛", measureType: .count, unit: "声",
+                                    dailyGoal: 108, iconName: "circle.grid.3x3",
+                                    colorHex: Palette.Light.fulfilled)
+    try vm.reload()
+    #expect(vm.rows.count == 1)
+    #expect(vm.startingTomorrow.isEmpty, "头一门课当天就能用，没什么要交代的")
+
+    // 同一天下午又立一门。
+    let 打坐 = try env.items.create(name: "打坐", measureType: .duration, unit: "",
+                                    dailyGoal: 1800, iconName: "figure.mind.and.body",
+                                    colorHex: Palette.Light.accent)
+    try vm.reload()
+    #expect(vm.rows.count == 1, "行为不变：今天的清单已经定下了")
+    #expect(vm.rows.first?.itemID == 念佛.id)
+    #expect(vm.startingTomorrow == ["打坐"], "但得把它说出来，否则他以为没存上")
+
+    // 归档的课**不许混进这句话**。它不在今天的清单里是因为归档了，
+    // 说成「从明天起算」是彻头彻尾的假话——它明天也不会出现。
+    try env.items.archive(打坐)
+    try vm.reload()
+    #expect(vm.startingTomorrow.isEmpty, "归档的课不是「明天起算」，是不再出现")
+    _ = 念佛
+}

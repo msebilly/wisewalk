@@ -40,6 +40,21 @@ final class TodayViewModel {
     private(set) var dayKey: Int = 0
     private(set) var rows: [TodayRow] = []
 
+    /// 今天新立、但今天还用不了的定课名字。
+    ///
+    /// 今天的清单在他今天头一回打开 App 时就定格了，之后立的课不追加进来——
+    /// 这是 `appendLateArrivals` 明确不许修平的不对称（守卫测试
+    /// `已经有课的那天新立的课仍旧不算今天` 钉着它）：上午已经显示出来的圆满
+    /// 不能因为下午加了一门课就退回未圆满，那是替他改写已经过完的半天。
+    ///
+    /// **设计对，但屏幕上从前一个字都没说。** 他 17:02 立了打坐，回今日页看不见，
+    /// 分不清这是「明天才算」还是「刚才没存上」——后一种解释会让他再立一遍，
+    /// 于是有了两门重名的课。这条属性就是拿来把话说出来的。
+    ///
+    /// ⚠️ **只装活跃的课。** 归档的课不在今天清单里是因为归档了，
+    /// 说它「从明天起算」是假话——它明天也不会出现。
+    private(set) var startingTomorrow: [String] = []
+
     /// 快照登记了、本机却找不到对应定课的应做项。
     ///
     /// `DaySnapshot.requiredItemIDs` 是裸 `[UUID]` 不是关系，而 CloudKit 把
@@ -148,6 +163,11 @@ final class TodayViewModel {
             return (rank[$0.itemID] ?? .max) < (rank[$1.itemID] ?? .max)
         }
 
+        // 活跃、却不在今天清单里的课 = 今天定格之后才立的。
+        // 取自 `active` 所以归档的天然不在其中；顺序跟着用户自己拖的顺序走。
+        let 今天要做的 = Set(plan.requiredItemIDs)
+        let 明天起算 = active.filter { !今天要做的.contains($0.id) }.map(\.name)
+
         // 三个状态**一起换**。上面每一步都会 throw（全是 fetch），
         // 中途换掉 `dayKey` 的话，抛错时视图会显示今天的日期配昨天的清单——
         // 而调用方（Task 14）只弹 alert、不回滚。
@@ -156,6 +176,7 @@ final class TodayViewModel {
         dayKey = key
         rows = sorted
         unresolvedItemIDs = unresolved
+        startingTomorrow = 明天起算
     }
 
     /// 勾选类的打勾／取消。
