@@ -184,6 +184,41 @@ final class DayLedger {
         return Self.dedupedRevocations(sameDay.filter { $0.item?.id == itemID })
     }
 
+    /// 这门课的「以往累计」眼下净剩多少。0 表示没记过，或者记过又撤了。
+    ///
+    /// §6.12 的注脚承诺「只需做一次」，但代码里**没有一行保证那个「一次」**——
+    /// `submitMigrationTotal` 只是套了个备注的普通 `submit`，再点一次就是叠加。
+    /// 他填错了回来重填，账面上凭空多出一份，方向是「多」，
+    /// 量级是他一辈子功课的量级。
+    ///
+    /// 这个查询是给表单用的：一打开就把已记过的数摆在他眼前。
+    /// **不是拦他**——这个 App 只在「圆满」一处替用户下判断，别处一律说出实情让他自己定。
+    /// 真有第二本旧功课本要补，那也是他看着实情做的决定。
+    ///
+    /// ⚠️ **靠 `note` 认，不是靠「这门课的全部流水」**：后者会把他今天念的 108 声
+    /// 也说成以往累计。
+    ///
+    /// ⚠️ **撤销要扣掉。** 记错了撤销之后，那句「已记过 3 小时」就成了假话，
+    /// 而他正是撤销完回来重记的——被一句假话拦住最冤。撤销笔照例过
+    /// `dedupedRevocations`，否则多台设备各撤一次会把净额扣成负数。
+    func migratedTotal(itemID: UUID) throws -> Int {
+        let note = ManualEntryViewModel.migrationNote
+        let 迁移笔 = try context.fetch(
+            FetchDescriptor<PracticeSession>(predicate: #Predicate { $0.note == note })
+        ).filter { $0.item?.id == itemID }
+        guard !迁移笔.isEmpty else { return 0 }
+
+        let 撤销键 = Set(迁移笔.map { "revoke:\($0.id.uuidString)" })
+        let 撤销笔 = try context.fetch(
+            FetchDescriptor<PracticeSession>(predicate: #Predicate<PracticeSession> { s in
+                if let n = s.note { return 撤销键.contains(n) } else { return false }
+            })
+        )
+        let 净额 = 迁移笔.reduce(0) { $0 + $1.amount }
+            + Self.dedupedRevocations(撤销笔).reduce(0) { $0 + $1.amount }
+        return max(0, 净额)
+    }
+
     /// §5.7：把「多台设备各撤了同一笔」合并回一笔。
     ///
     /// `revoke` 的幂等键是 `note` 里的 `revoke:<原记录 id>`，可它**只查本机库**。

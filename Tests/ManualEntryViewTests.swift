@@ -219,3 +219,33 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     #expect(五千小时 == 18_000_000)
     #expect(DurationField.split(seconds: 五千小时).hours == 5000, "来回一趟不许丢")
 }
+
+@MainActor
+@Test func 陈述句里的数量不带正负号但量纲照旧() throws {
+    // 「已经记过以往累计 +3 小时」——那个「+」会让人以为账本上又多了一行，
+    // 而这句话只是在陈述现状。流水行要符号，陈述句不要。
+    //
+    // 但**量纲一步都不能让**：`plainAmountText` 与 `amountText` 共用同一段判断，
+    // 若哪天有人给陈述句另写一份，10800 就会在这儿被说成「10800」。
+    let env = try AppEnvironment(container: ModelContainerFactory.inMemory(),
+                                 defaults: UserDefaults(suiteName: "test.\(UUID().uuidString)")!)
+    let 打坐 = try env.items.create(name: "打坐", measureType: .duration, unit: "",
+                                    dailyGoal: nil, iconName: "figure.mind.and.body",
+                                    colorHex: Palette.Light.accent)
+    let 念佛 = try env.items.create(name: "念佛", measureType: .count, unit: "声",
+                                    dailyGoal: nil, iconName: "circle.grid.3x3",
+                                    colorHex: Palette.Light.fulfilled)
+
+    #expect(EntryRow.plainAmountText(10_800, item: 打坐) == "3 小时",
+            "计时类说时长，不许把秒数报出来")
+    #expect(EntryRow.plainAmountText(290_000, item: 念佛) == "290000 声")
+    #expect(!EntryRow.plainAmountText(10_800, item: 打坐).contains("+"), "陈述句不带号")
+
+    // 流水行那一套没被这次抽取改坏——抽公共函数最容易在这儿翻车。
+    let now = Date()
+    let s = try env.ledger.record(item: 打坐, amount: 10_800, source: .manual,
+                                  startedAt: now, at: now)
+    #expect(EntryRow.amountText(s, item: 打坐) == "+3 小时")
+    let neg = try env.ledger.revoke(s, at: now)
+    #expect(EntryRow.amountText(neg, item: 打坐) == "−3 小时", "真减号 U+2212")
+}

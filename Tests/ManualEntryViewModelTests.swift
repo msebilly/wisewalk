@@ -402,3 +402,58 @@ private func 库里一条流水都没有(_ ctx: ModelContext) throws -> Bool {
     vm.beginMigration()
     #expect(vm.selectedItem?.id == 念佛.id)
 }
+
+@MainActor
+@Test func 已经记过以往累计的课得说得出记过多少() throws {
+    // §6.12 的注脚白纸黑字写着「**只需做一次**」，而 `submitMigrationTotal` 只是
+    // 套了个备注的普通 `submit`——**没有一行代码保证那个「一次」**。
+    //
+    // 他记完发现填错了（比如刚被 3600 倍那条坑过一回），回来重填一遍：
+    // 那是**叠加不是覆盖**，账面上凭空多出一份。方向是「多」，
+    // 量级就是他一辈子功课的量级。「一声都不能多」在这儿是被一句
+    // 承诺过却没兑现的注脚破掉的。
+    //
+    // 这个 App 只在「圆满」一处替用户下判断，别处一律**把实情说出来，让他自己定**。
+    // 所以不是禁止第二次，是让表单一打开就写着「已经记过 3 小时」——
+    // 信息前置，他根本走不到误操作那一步；真要再记一笔（翻出第二本旧功课本），
+    // 也是他看着实情做的决定。
+    let env = try AppEnvironment(container: ModelContainerFactory.inMemory(),
+                                 defaults: UserDefaults(suiteName: "test.\(UUID().uuidString)")!)
+    let 打坐 = try env.items.create(name: "打坐", measureType: .duration, unit: "",
+                                    dailyGoal: nil, iconName: "figure.mind.and.body",
+                                    colorHex: Palette.Light.accent)
+    let 念佛 = try env.items.create(name: "念佛", measureType: .count, unit: "声",
+                                    dailyGoal: nil, iconName: "circle.grid.3x3",
+                                    colorHex: Palette.Light.fulfilled)
+
+    #expect(try env.ledger.migratedTotal(itemID: 打坐.id) == 0, "没记过就是 0")
+
+    let vm = ManualEntryViewModel(ledger: env.ledger, items: env.items)
+    vm.selectedItem = 打坐
+    vm.selectedDayKey = DayKey.today()
+    vm.amount = 10_800
+    let 那一笔 = try vm.submitMigrationTotal()
+    #expect(try env.ledger.migratedTotal(itemID: 打坐.id) == 10_800)
+
+    // **不许串课。** 串了的话「念佛已记过 3 小时」，用户会以为自己记错了课去撤，
+    // 撤掉的却是打坐那笔真账。
+    #expect(try env.ledger.migratedTotal(itemID: 念佛.id) == 0, "另一门课不该跟着有数")
+
+    // 日常那些账一笔都不算数——迁移笔是靠 note 认出来的，
+    // 若改成「查这门课的全部流水」，他今天念的 108 声也会被说成「以往累计」。
+    _ = try env.ledger.record(item: 念佛, amount: 108, source: .counter,
+                              startedAt: Date(), at: Date())
+    #expect(try env.ledger.migratedTotal(itemID: 念佛.id) == 0, "日常功课不是以往累计")
+
+    // 记错了撤销掉，就得重新算作「没记过」——否则他撤完还被那句话拦着，
+    // 而屏幕上说的「已记过 3 小时」此刻是**假的**。
+    _ = try env.ledger.revoke(那一笔, at: Date())
+    #expect(try env.ledger.migratedTotal(itemID: 打坐.id) == 0,
+            "撤销之后那句话就不能再说了，不然它在说谎")
+
+    // 撤完再记一笔，照样说得出来。
+    vm.selectedItem = 打坐
+    vm.amount = 7_200
+    _ = try vm.submitMigrationTotal()
+    #expect(try env.ledger.migratedTotal(itemID: 打坐.id) == 7_200)
+}

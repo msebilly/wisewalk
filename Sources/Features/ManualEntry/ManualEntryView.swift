@@ -12,18 +12,29 @@ enum EntryRow {
 
     /// 数量的说法。计时类按时长说——「+1800」对打坐是没有意义的数字。
     static func amountText(_ s: PracticeSession, item: PracticeItem?) -> String {
+        // 打卡类没有「多少」可言，只有做没做，所以不走下面那套数字说法。
+        if item?.measureType == .check {
+            return s.amount < 0 ? "取消" : "已完成"
+        }
         // 用真的减号 U+2212 而不是连字符：等宽数字下连字符太短，
         // 一列流水里正负号高低不齐，扫一眼看不出哪笔是撤销。
         let sign = s.amount < 0 ? "\u{2212}" : "+"
-        let magnitude = abs(s.amount)
+        return sign + plainAmountText(s.amount, item: item)
+    }
+
+    /// 不带正负号的说法。给「已经记过 3 小时」这类**陈述句**用——
+    /// 那句话不是账本上的一行，带个「+」会让人以为又多记了一笔。
+    ///
+    /// 与 `amountText` 共用同一段量纲判断：「计时类按时长说，不报秒数」
+    /// 这条规矩全 App 只许写一遍，写两遍早晚有一处把 10800 说成 10800。
+    static func plainAmountText(_ amount: Int, item: PracticeItem?) -> String {
+        let magnitude = abs(amount)
         switch item?.measureType {
         case .duration:
-            return "\(sign)\(DurationFormat.spoken(magnitude))"
-        case .check:
-            return s.amount < 0 ? "取消" : "已完成"
+            return DurationFormat.spoken(magnitude)
         default:
             let unit = item?.unit ?? ""
-            return unit.isEmpty ? "\(sign)\(magnitude)" : "\(sign)\(magnitude) \(unit)"
+            return unit.isEmpty ? "\(magnitude)" : "\(magnitude) \(unit)"
         }
     }
 
@@ -253,6 +264,7 @@ struct MigrationSheet: View {
     let onDone: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.theme) private var theme
     @State private var failure: String?
     /// 计时类专用。见下面 `isDuration` 那一段。
     @State private var hours = 0
@@ -305,7 +317,14 @@ struct MigrationSheet: View {
                         }
                     }
                 } footer: {
-                    Text("会记成一笔单独的账，注明是以往累计，不会与日后的功课混在一起。只需做一次。")
+                    if vm.migratedSoFar > 0 {
+                        // 已经记过就把数摆出来。**不拦他**——摆出来他自己就知道
+                        // 该不该再记一笔，而这个 App 只在「圆满」一处替用户下判断。
+                        Text("这门功课已经记过以往累计 \(EntryRow.plainAmountText(vm.migratedSoFar, item: vm.selectedItem))。记错了可以在下面的记录里撤销，再重记一笔。")
+                            .foregroundStyle(theme.accent)
+                    } else {
+                        Text("会记成一笔单独的账，注明是以往累计，不会与日后的功课混在一起。只需做一次。")
+                    }
                 }
             }
             .navigationTitle("记入以往的累计")
@@ -334,6 +353,9 @@ struct MigrationSheet: View {
                 vm.amount = 0
                 hours = 0
                 minutes = 0
+                // 「已经记过多少」也得跟着换——不换就是把上一门课的数
+                // 说在这一门头上，而这句话正是他判断「我记过没有」的唯一依据。
+                vm.refreshMigratedSoFar()
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { vm.endMigration(); dismiss() } }

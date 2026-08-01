@@ -140,6 +140,21 @@ final class ManualEntryViewModel {
     func beginMigration() {
         borrowed = (selectedItem, amount)
         amount = 0
+        refreshMigratedSoFar()
+    }
+
+    /// 这门课已经记过多少「以往累计」。0 表示没记过（或记过又撤了）。
+    ///
+    /// 摆给用户看，**不用来拦他**。§6.12 承诺「只需做一次」却没有任何机制兑现，
+    /// 他填错了回来重填就是叠加。信息前置比事后弹窗好：他一打开就看见，
+    /// 根本走不到误操作那一步；真要再记一笔，也是看着实情做的决定。
+    private(set) var migratedSoFar: Int = 0
+
+    /// 换课之后必须重算——不换就会把上一门课的数说在这一门头上，
+    /// 而这句话正是他判断「我是不是记过了」的唯一依据。
+    func refreshMigratedSoFar() {
+        guard let id = selectedItem?.id else { migratedSoFar = 0; return }
+        migratedSoFar = (try? ledger.migratedTotal(itemID: id)) ?? 0
     }
 
     /// 还回借走的两个字段。**成功提交后也要调**——提交完照样得把补记表单
