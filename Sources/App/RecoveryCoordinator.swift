@@ -52,6 +52,22 @@ final class RecoveryCoordinator {
     private(set) var pending: [PendingRecovery] = []
     private(set) var didRun = false
 
+    /// 队头那一份**要落的那一天、那门功课**账上已经有的数。`nil` = 没有，或算不出来。
+    ///
+    /// 存在的理由，`postpone()` 的注释里已经写着了：用户推迟之后可能自己手动补记
+    /// 一遍，下次启动又被问同一份。那条注释说「那时他该点『不记了』」——
+    /// **可他凭什么知道？** 屏幕上写的是「有一笔没记上」，而那时这句话已经是假话。
+    /// 对「有一笔没记上」最自然的反应就是点「记上」，于是同一笔进了两回账。
+    ///
+    /// ⚠️ **只摆事实，不出主意。** App 分不清「他补记过这一笔」和「那天另有一坐」：
+    /// 早课记完 108、晚上又念到 50 时崩溃，那 108 是另一坐，该点的是「记上」。
+    /// 谁也替他判断不了，所以只把数摆出来。
+    ///（本 App 只在「圆满」一处替用户下判断，那是唯一一处。）
+    private(set) var alreadyOnBooks: Int?
+
+    /// 上面那个数带上量纲的说法。光一个数他对不上账。
+    private(set) var alreadyOnBooksText: String?
+
     @ObservationIgnored private let env: AppEnvironment
     @ObservationIgnored private var drafts: [UUID: SessionDraft] = [:]
 
@@ -131,8 +147,43 @@ final class RecoveryCoordinator {
         }
 
         drafts = lookup
-        pending = result.sorted { ($0.startedAt, $0.id.uuidString) < ($1.startedAt, $1.id.uuidString) }
+        setPending(result.sorted { ($0.startedAt, $0.id.uuidString) < ($1.startedAt, $1.id.uuidString) })
         didRun = true
+    }
+
+    /// `pending` **只从这里改**。
+    ///
+    /// 「队头是谁」和「队头那天账上有多少」是同一个判断的两半，散开写就会有一半忘了跟着动
+    /// ——问第二份时还端着第一份那门课的账，张冠李戴比不说更坏。
+    /// （`6c12439` 那 3600 倍就是同一个判断在两个视图各写一遍写出来的。）
+    private func setPending(_ next: [PendingRecovery]) {
+        pending = next
+        guard let head = next.first else {
+            alreadyOnBooks = nil
+            alreadyOnBooksText = nil
+            return
+        }
+        // 算不出来就闭嘴。**宁可少说一句，也不能说一个错的数**——
+        // 他要拿这个数去决定按哪个按钮。
+        guard let item = try? env.items.item(id: head.itemID),
+              let total = try? env.ledger.total(on: dayKey(of: head), itemID: head.itemID),
+              total > 0 else {
+            alreadyOnBooks = nil
+            alreadyOnBooksText = nil
+            return
+        }
+        alreadyOnBooks = total
+        alreadyOnBooksText = text(total, item: item)
+    }
+
+    /// 这一份**记上之后会落在哪一天**。
+    ///
+    /// 口径必须和 `accept()` 一模一样（`at: draft.updatedAt`，也就是 `endedAt`），
+    /// 否则摆出来的是隔壁那天的账——他照着一个不相干的数按按钮。
+    private func dayKey(of item: PendingRecovery, timeZone: TimeZone = .current) -> Int {
+        DayKey.make(from: item.endedAt,
+                    tzOffsetMinutes: DayKey.currentOffsetMinutes(at: item.endedAt, timeZone: timeZone),
+                    dayStartHour: env.settings.dayStartHour)
     }
 
     /// 记上。**用草稿自己的 `sessionID`**——弹窗点两下、或恢复到一半又崩，
@@ -164,7 +215,7 @@ final class RecoveryCoordinator {
         // 或上一轮 commit 之后 UI 又回调了一次）。**静默放行是对的**——
         // 该记的已经记了，再说什么都只会让人以为要记两笔。
         guard let draft = drafts[item.id] else {
-            pending.removeAll { $0.id == item.id }
+            setPending(pending.filter { $0.id != item.id })
             return
         }
         // ⛔ 但「查不到那门功课」完全是另一回事，**不许跟上面走同一条路**。
@@ -184,7 +235,7 @@ final class RecoveryCoordinator {
                                   at: draft.updatedAt,
                                   dayStartHour: env.settings.dayStartHour, timeZone: timeZone)
         drafts[item.id] = nil
-        pending.removeAll { $0.id == item.id }
+        setPending(pending.filter { $0.id != item.id })
     }
 
     func discard(_ item: PendingRecovery) throws {
@@ -192,7 +243,7 @@ final class RecoveryCoordinator {
             try env.drafts.discard(draft)
         }
         drafts[item.id] = nil
-        pending.removeAll { $0.id == item.id }
+        setPending(pending.filter { $0.id != item.id })
     }
 
     /// 把这一轮的问话整个推迟到下次启动——**一份草稿都不动**。
@@ -214,7 +265,7 @@ final class RecoveryCoordinator {
     /// 不许在这里删草稿：删了就是替用户做了「不记了」的决定，
     /// 而他按的那个按钮上写的是「以后再说」。
     func postpone() {
-        pending.removeAll()
+        setPending([])
         drafts.removeAll()
     }
 

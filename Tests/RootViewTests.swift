@@ -113,3 +113,28 @@ import Foundation
     #expect(数.contains("计数") && !数.contains("计时"), "计数的那份不能说成计时")
     #expect(时.contains("计时") && !时.contains("计数"), "计时的那份不能说成计数")
 }
+
+@MainActor
+@Test func 那一天账上已经有的数要摆进弹窗里() throws {
+    // 「有一笔没记上」这句话，在他自己已经补记过之后就成了假话。
+    // 而对假话最自然的反应就是点「记上」——同一笔进两回账。
+    // 摆一个数出来，判断留给他。
+    let p = PendingRecovery(id: UUID(), itemID: UUID(), itemName: "念佛",
+                            source: .counter, suggestedAmount: 108, amountText: "108 声",
+                            startedAt: Date(timeIntervalSince1970: 1_785_000_000),
+                            endedAt: Date(timeIntervalSince1970: 1_785_003_600))
+    let tz = TimeZone(identifier: "Asia/Shanghai")!
+    let 有 = RootView.recoveryMessage(p, timeZone: tz, alreadyOnBooksText: "108 声")
+    #expect(有.contains("已经记了 108 声"), "账上已有的数得说出来")
+    #expect(有.contains("另外"), "得说清这是**不含**眼下这一笔的数，否则他以为已经记上了")
+
+    // ⚠️ 只摆事实，不出主意：App 分不清「他补记过这一笔」和「那天另有一坐」。
+    // 早课记完 108、晚上又念到 50 时崩溃，那 108 是另一坐，该点的是「记上」。
+    for 指手画脚 in ["就点", "请点", "建议", "应该", "不必再记"] {
+        #expect(!有.contains(指手画脚), "「\(指手画脚)」是在替他判断——这一处 App 判断不了")
+    }
+
+    let 无 = RootView.recoveryMessage(p, timeZone: tz, alreadyOnBooksText: nil)
+    #expect(!无.contains("已经记了"), "那天账上什么都没有，就不该无中生有说一句")
+    #expect(无.contains("还没记上"), "原来那两句一个字都不能少")
+}

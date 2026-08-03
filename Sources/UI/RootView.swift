@@ -45,15 +45,25 @@ struct RootView: View {
     ///
     /// `timeZone` 留作参数是为了测试能注入固定时区：本机是 PDT，
     /// 拿 `.current` 去断言就是拿实现那把尺子量实现（纪律 ⑬）。
+    /// - Parameter alreadyOnBooksText: 这一笔要落的那天、那门功课账上**另外**已经有的数。
+    ///   `nil` 就一个字也不提——那天真没有，或者算不出来。
+    ///   见 `RecoveryCoordinator.alreadyOnBooks`：只摆事实，不出主意。
     static func recoveryMessage(_ item: PendingRecovery,
-                                timeZone: TimeZone = .current) -> String {
+                                timeZone: TimeZone = .current,
+                                alreadyOnBooksText: String? = nil) -> String {
         let kind = item.source == .timer ? "计时" : "计数"
         let f = DateFormatter()
         f.locale = Locale(identifier: "zh_CN")
         f.timeZone = timeZone
         f.dateFormat = "M月d日 HH:mm"
-        return "上次「\(item.itemName)」\(kind)到 \(item.amountText) 时应用退出了，还没记上。\n"
+        var lines = "上次「\(item.itemName)」\(kind)到 \(item.amountText) 时应用退出了，还没记上。\n"
             + "记上会算在 \(f.string(from: item.endedAt))，也就是当时那一天。"
+        // 「另外」这两个字不能省：少了它，他会以为这个数里已经含着眼下这一笔，
+        // 于是点「不记了」——而那一笔其实还没记上。
+        if let already = alreadyOnBooksText {
+            lines += "\n那一天「\(item.itemName)」另外已经记了 \(already)。"
+        }
+        return lines
     }
 
     var body: some View {
@@ -78,7 +88,9 @@ struct RootView: View {
             Button("不记了", role: .destructive) { discard() }
             Button("以后再说", role: .cancel) { recovery.postpone() }
         } message: {
-            Text(recovery.pending.first.map { Self.recoveryMessage($0) } ?? "")
+            Text(recovery.pending.first.map {
+                Self.recoveryMessage($0, alreadyOnBooksText: recovery.alreadyOnBooksText)
+            } ?? "")
         }
         .alert("出了点问题", isPresented: .presenting($failure)) {
             // 先把话说完，再把没裁决完的那些重新支起来——两个 alert 不抢同一块屏。

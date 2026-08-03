@@ -310,3 +310,107 @@ private func makeRecovery() throws -> (RecoveryCoordinator, AppEnvironment, Prac
     #expect(再.pending.count == 1, "下次启动必须还问得出来——推迟一笔不等于丢一笔")
     #expect(再.pending.first?.suggestedAmount == 108, "连数目都不许变")
 }
+
+@MainActor
+@Test func 那一天账上已经有的数得说出来() throws {
+    // ⛔ `postpone()` 的注释里白纸黑字写着这条代价：「用户推迟之后可能自己手动补记
+    // 一遍，下次启动又被问同一份。那时他该点『不记了』。」
+    //
+    // **可他凭什么知道该点『不记了』？** 弹窗上写的是「有一笔没记上」——
+    // 而那时候这句话已经是假话了，他刚记过。对「有一笔没记上」最自然的反应就是
+    // 点「记上」，于是这 108 声进了两回账。
+    //
+    // 「一声都不能多」在这条路上是靠一句 App 从没说出口的话撑着的。
+    //
+    // ⚠️ 只许陈述，不许出主意。App **分不清**「他补记过这一笔」和「那天另有一坐」：
+    // 早课记完 108、晚上又念到 50 时崩溃，那 108 是另一坐，该点的是「记上」。
+    // 所以这里只把账上的数摆出来，判断留给他。
+    let (rc, env, item) = try makeRecovery()
+    let now = Date()
+    let draft = try env.drafts.begin(itemID: item.id, source: .counter, at: now)
+    try env.drafts.update(draft, amount: 108, at: now)
+    try rc.runAtLaunch()
+    #expect(rc.alreadyOnBooks == nil, "那天账上什么都没有，就不该无中生有说一句")
+
+    rc.postpone()
+    // 他以为没记上，自己去补记页记了一遍。
+    try env.ledger.record(item: item, amount: 108, source: .manual, startedAt: now, at: now)
+
+    let 再 = RecoveryCoordinator(env: env)
+    try 再.runAtLaunch()
+    #expect(再.pending.count == 1, "前提：推迟过的那一份还问得出来")
+    #expect(再.alreadyOnBooks == 108, "他已经自己记过了，这个数必须摆到他眼前")
+    #expect(再.alreadyOnBooksText == "108 声", "摆出来要带单位，光一个数他对不上账")
+}
+
+@MainActor
+@Test func 这个数得跟着队头的那一份走() throws {
+    // 两份草稿逐个问。答完第一份，问的就换成了第二份——
+    // 这个数若只在 `runAtLaunch` 按队头算一次，问第二份时说的还是第一份那门课的账，
+    // **张冠李戴比不说更坏**。它得跟着 `pending` 一起动。
+    //
+    //（同一门课两份草稿在生产里造不出来：`DraftStore.begin` 每门课只留一份。
+    //  所以这条用两门课，那才是真会发生的形状。）
+    let (rc, env, item) = try makeRecovery()
+    let 拜佛 = try env.items.create(name: "拜佛", measureType: .count, unit: "拜",
+                                   dailyGoal: nil, iconName: "figure.stand",
+                                   colorHex: Palette.Light.accent)
+    let now = Date()
+    let d1 = try env.drafts.begin(itemID: item.id, source: .counter, at: now)
+    try env.drafts.update(d1, amount: 108, at: now)
+    let d2 = try env.drafts.begin(itemID: 拜佛.id, source: .counter, at: now.addingTimeInterval(1))
+    try env.drafts.update(d2, amount: 21, at: now.addingTimeInterval(1))
+    // 拜佛那天早课已经记过 48 拜，念佛没记过。
+    try env.ledger.record(item: 拜佛, amount: 48, source: .manual, startedAt: now, at: now)
+
+    try rc.runAtLaunch()
+    #expect(rc.pending.count == 2, "前提：两份都该问")
+    #expect(rc.pending.first?.itemName == "念佛", "前提：队头是念佛")
+    #expect(rc.alreadyOnBooks == nil, "念佛那天账上什么都没有")
+
+    try rc.accept(rc.pending[0])
+    #expect(rc.pending.first?.itemName == "拜佛", "前提：队头换成拜佛了")
+    #expect(rc.alreadyOnBooks == 48, "问拜佛就得说拜佛的账，不能还端着念佛那份")
+    #expect(rc.alreadyOnBooksText == "48 拜")
+}
+
+@MainActor
+@Test func 撤销之后那一天就当没记过() throws {
+    // 记过又撤销，账上就是 0。这时再说「已经记了 108 声」是句假话，
+    // 而他正是撤完回来重记的——`08fb0ba` 在迁移页上踩过同一个坑。
+    let (rc, env, item) = try makeRecovery()
+    let now = Date()
+    let draft = try env.drafts.begin(itemID: item.id, source: .counter, at: now)
+    try env.drafts.update(draft, amount: 108, at: now)
+    let s = try env.ledger.record(item: item, amount: 108, source: .manual, startedAt: now, at: now)
+    try env.ledger.revoke(s, at: now)
+
+    try rc.runAtLaunch()
+    #expect(rc.alreadyOnBooks == nil, "撤销之后那一天就当没记过，不许拿撤掉的数吓唬他")
+}
+
+@MainActor
+@Test func 昨晚崩的今早问要摆昨天的账不是今天的() throws {
+    // ⛔ 这条是变异审查逼出来的：前面三条全用 `Date()` 造草稿，
+    // 「今天」和「这一笔要落的那天」是同一天，**尺子根本分不出来**。
+    // 把 `dayKey(of:)` 换成 `DayKey.today()` 照样全绿。
+    //
+    // 而恢复弹窗的**典型场景恰恰是隔夜**：昨晚念着念着崩了，今早开 App 才被问。
+    // 这时摆今天的账，就是拿一个不相干的数让他按按钮。
+    let (rc, env, item) = try makeRecovery()
+    // ⚠️ 差值必须**大于 24 小时**才保证跨天。原先写的 -14 小时在夜里跑就跨不过午夜，
+    // 这条测试会在一天里的某些时刻**悄悄变成空测**——比没有更坏。
+    // 下面那句前提断言是第二道保险：宁可红，也不许空跑。
+    let 昨晚 = Date().addingTimeInterval(-30 * 3600)
+    #expect(DayKey.make(from: 昨晚, tzOffsetMinutes: DayKey.currentOffsetMinutes(at: 昨晚)) != DayKey.today(),
+            "前提：这两个时刻必须真的不在同一天，否则这条测什么也没测")
+    let draft = try env.drafts.begin(itemID: item.id, source: .counter, at: 昨晚)
+    try env.drafts.update(draft, amount: 108, at: 昨晚)
+    // 昨天他自己补记过 108，今天另记了 21——两个数不一样才验得出摆的是哪一天。
+    try env.ledger.record(item: item, amount: 108, source: .manual, startedAt: 昨晚, at: 昨晚)
+    try env.ledger.record(item: item, amount: 21, source: .manual, startedAt: Date(), at: Date())
+
+    try rc.runAtLaunch()
+    #expect(rc.pending.count == 1, "前提：昨晚那份还问得出来")
+    #expect(rc.alreadyOnBooks == 108, "摆的必须是这一笔要落的那一天——昨天，不是今天")
+}
