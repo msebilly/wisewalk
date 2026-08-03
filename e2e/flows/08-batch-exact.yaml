@@ -1,0 +1,32 @@
+# 长按选 500，就是 500 声。**一声不多，一声不少。**
+#
+# 02 验的是「点 20 下 = 20 声」，这条验的是**另一条加法**：
+# 一次进账几百声。这条路此前端到端从没走过，而它每一下的量级是 02 的几十倍——
+# 错一次的代价也是一百倍。
+#
+# 入口是**长按 0.5 秒**（`CounterView.onLongPressGesture`），
+# 不是任何一个看得见的按钮。这也是为什么它一直没被走到。
+#
+# ⛔ **档位挑的是 500 而不是 108，是有意的。**
+# `TemplateCatalog.defaultBatchStep` 就是 108，挑 108 的话
+# `vm.setBatchStep(batchStep)` 这行整个删掉这条 flow 照样绿——
+# 它验的就不是「选中的那一档生效了」，而是「默认值恰好等于我挑的数」。
+# 初稿正是这么写的。**挑档位测试别挑默认档。**
+# 500 与 108 无倍数关系，「加了两遍」「拿默认值顶了」都会露馅。
+appId: com.msebilly.wisewalk
+---
+- runFlow: subflows/new-count-item.yaml
+- tapOn: "念佛"
+# 先点 1 下。之后加 500，屏上必须是 501——
+# 只验 500 的话，「批量把之前的数冲掉了」这种走样照样绿。
+- tapOn: { point: "50%,45%" }
+- assertVisible: "本次 1"
+- longPressOn: { point: "50%,45%" }
+- assertVisible: "一次加多少"
+- tapOn: "500"
+# 确认键上必须写着**将要加的那个数**。屏幕不报数，用户就是在盲按。
+- assertVisible: "加 500"
+- tapOn: "加 500"
+- assertVisible: "本次 501"
+- tapOn: "结束并记录"
+- assertVisible: "501 声"
