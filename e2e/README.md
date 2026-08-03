@@ -44,6 +44,7 @@ make install-sim              # 编译并装进当前开着的模拟器
 | `03-recovery-alert` | `95ee7fc` `fe8aeb6` | **弹窗关掉之后界面还点得动**（由 `03-recovery.sh` 驱动，见下）|
 | `04-migration-duration` | `6c12439` `08fb0ba` | 计时类的以往累计按时分问，不是问秒 |
 | `05-chinese-only` | `35e8117` | 界面里不许冒 `Edit` / `Cancel` |
+| `06-postpone-then-manual` | `837ebc1` | 推迟之后他自己补记过，再问时得说出账上已有的数（由 `06-postpone.sh` 驱动）|
 
 ## 这张网真咬得住吗
 
@@ -53,12 +54,22 @@ make install-sim              # 编译并装进当前开着的模拟器
 |---|---|
 | 把 `fe8aeb6` 退回去（`showRecovery = !pending.isEmpty`，从 true 又写成 true）| 03 在**答完第一份之后**红，脚本另报「还剩 1 份草稿没裁决」 |
 | 迁移页 `syncDial` 写 `hours*60+minutes`（当成分钟）| 04 红在 `已经记过以往累计 3 小时` |
+| `accept/discard` 不刷新「账上已有的数」| 单元测试红（`这个数得跟着队头的那一份走`）|
+| 「那一笔要落的那天」换成「今天」| 单元测试红（`昨晚崩的今早问要摆昨天的账不是今天的`）|
 
 第二条值得多看一眼：变异之后「小时」「分」两个标签**照样在**，
 01/02/05 也照样绿——**红的是账上那个数**。
 断言挑「3 小时」而不是挑标签，这一步没白挑。
 
 改动这几条 flow 之后，请照样咬一口再信它。
+
+## ⚠️ 造草稿要把 `startedAt` 错开
+
+`RecoveryCoordinator` 按 `(startedAt, id.uuidString)` 排序。两份草稿时间戳一样，
+就退化成**按随机 UUID 比大小**——先问哪一份成了掷硬币，
+靠「先问 108」立论的断言一半时间红一半时间绿。而它**头一回还会跑绿**。
+
+`lib.sh` 的 `ww_seed_drafts` 已经按序错开了。自己写别的 seed 时别忘了。
 
 ## 写 flow 的几条经验
 
@@ -110,6 +121,11 @@ sqlite3 "$C/.../WiseWalk.store" \
 **报 COMPLETED 之后要 `sleep 2` 再截图**，不然拍到动画中间态。
 `scrollUntilVisible` 不太靠得住，多来几次 `swipe` 更稳。
 `maestro hierarchy` 对 SwiftUI 几乎是空的，别指望它。
+
+**一个可见 `Text` 和一个同名 `accessibilityLabel` 撞车时，文本选择器会挑错。**
+补记页的数量框就是这样：`Text("数量")` 和框的标签都叫「数量」，
+`tapOn: "数量"` 点中的是那个 `Text`，`index: 1` 也不灵，只能落回坐标。
+**这是测试的歧义，不是 App 的缺陷**——VoiceOver 读到框时说「数量, 0」，正是要的。
 
 **bash 3.2 的两个坑**（macOS 自带的就是 3.2，改不了）：
 中文标识符不认（`模式=x` 报 `command not found`）；
