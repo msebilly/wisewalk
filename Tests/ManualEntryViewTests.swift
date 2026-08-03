@@ -249,3 +249,44 @@ private func 北京(_ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
     let neg = try env.ledger.revoke(s, at: now)
     #expect(EntryRow.amountText(neg, item: 打坐) == "−3 小时", "真减号 U+2212")
 }
+
+@MainActor
+@Test func 本机记的那些不必每行都报一遍机器名() throws {
+    // ⛔ 每一行都挂着 `iPhone·TUTB`。
+    //
+    // 它是给第 3 卷的诊断用的——「这笔账是哪台设备记的」。可 CloudKit 还没上，
+    // **眼下每个用户都是单设备**，于是每一行报的都是同一台机器：
+    // 零信息，却占着一行的宽度。
+    //
+    // 而且这是一个面向大陆居士的中文界面，`iPhone` 是**英文**
+    //（`35e8117` 为了三处英文专门修过一轮，那次只盯着系统补的按钮）。
+    //
+    // 判据不是「有没有第二台设备」，是**这一笔是不是本机记的**：
+    // 本机记的说了等于没说，别的设备记的才是他需要知道的一句。
+    let env = try AppEnvironment(container: ModelContainerFactory.inMemory(),
+                                 defaults: UserDefaults(suiteName: "test.\(UUID().uuidString)")!)
+    let item = try env.items.create(name: "念佛", measureType: .count, unit: "声",
+                                    dailyGoal: nil, iconName: "circle.grid.3x3",
+                                    colorHex: Palette.Light.fulfilled)
+    let now = Date()
+    let 本机记的 = try env.ledger.record(item: item, amount: 108, source: .manual,
+                                       startedAt: now, at: now)
+
+    let 这台 = env.ledger.deviceName
+    #expect(!这台.isEmpty, "前提：本机的落款不该是空的")
+
+    let 自己 = EntryRow.metaText(本机记的, thisDevice: 这台)
+    #expect(自己 == "\(EntryRow.timeText(本机记的)) · 手动补记",
+            "本机记的就别报机器名了——他知道是自己记的")
+    #expect(!自己.contains("iPhone"), "中文界面里不该每行都冒一个英文机型名")
+
+    // 第 3 卷同步进来的那些，落款不是本机，这时候这句话才有内容。
+    本机记的.deviceName = "iPad·X7QP"
+    let 别处 = EntryRow.metaText(本机记的, thisDevice: 这台)
+    #expect(别处.contains("iPad·X7QP"), "别的设备记的必须说出来——他要知道这笔不是自己在这台机器上记的")
+
+    // 老记录（`deviceName` 默认空串）也不该多出一个孤零零的间隔点。
+    本机记的.deviceName = ""
+    #expect(!EntryRow.metaText(本机记的, thisDevice: 这台).hasSuffix("·"),
+            "落款是空的时候不许留个光秃秃的间隔点")
+}

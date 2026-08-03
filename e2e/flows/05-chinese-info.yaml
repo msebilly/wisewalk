@@ -1,0 +1,18 @@
+# 记完一笔之后，流水那行小字里也不许冒英文。
+#
+# 守的是「本机记的那些不必每行都报一遍机器名」：这一行从前写死了
+# `11:44 · 手动补记 · iPhone·TUTB`——`iPhone·XXXX` 是 `UIDevice.model`
+# 拼出来的**英文机型名**，而且 CloudKit 还没上，每个用户都是单设备，
+# 每一行报的都是同一台机器。05 上一段够不到这里（它没记过账）。
+appId: com.msebilly.wisewalk
+---
+- runFlow: subflows/new-count-item.yaml
+- tapOn: { point: "10%,10%" }
+- tapOn: { point: "88%,35%" }
+- inputText: "108"
+- tapOn: "补记一笔"
+- tapOn: "记上"
+- tapOn: "好"
+- assertVisible: "+108 声"
+- assertVisible: ".*手动补记.*"
+- assertNotVisible: ".*iPhone.*"

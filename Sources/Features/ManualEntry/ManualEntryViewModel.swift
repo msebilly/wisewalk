@@ -36,7 +36,10 @@ final class ManualEntryViewModel {
     private var borrowed: (item: PracticeItem?, amount: Int)?
 
     private let ledger: DayLedger
+    /// 本机的落款，界面据此决定要不要报机器名。
     private let items: PracticeItemStore
+
+    var thisDevice: String { ledger.deviceName }
 
     init(ledger: DayLedger, items: PracticeItemStore) {
         self.ledger = ledger

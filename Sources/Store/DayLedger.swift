@@ -11,7 +11,9 @@ import SwiftData
 @MainActor
 final class DayLedger {
     private let context: ModelContext
-    private let deviceName: String
+    /// 本机的落款。界面拿它判断「这一笔是不是本机记的」——
+    /// 是的话就别报机器名了（`本机记的那些不必每行都报一遍机器名`）。
+    let deviceName: String
 
     init(context: ModelContext, deviceName: String) {
         self.context = context

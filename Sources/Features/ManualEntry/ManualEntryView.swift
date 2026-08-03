@@ -49,6 +49,18 @@ enum EntryRow {
         }
     }
 
+    /// 流水底下那行小字：`11:44 · 手动补记`，来自别处的再加上 ` · iPad·X7QP`。
+    ///
+    /// **本机记的不报机器名。** 它是给第 3 卷诊断用的，可眼下每个用户都是单设备，
+    /// 每一行报的都是同一台机器——零信息，却占着一行的宽度，
+    /// 而且在一个中文界面里每行冒一个英文机型名。
+    /// 别的设备记的才是他需要知道的一句。
+    static func metaText(_ s: PracticeSession, thisDevice: String) -> String {
+        let head = "\(timeText(s)) · \(sourceText(s))"
+        guard !s.deviceName.isEmpty, s.deviceName != thisDevice else { return head }
+        return "\(head) · \(s.deviceName)"
+    }
+
     static func timeText(_ s: PracticeSession) -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "zh_Hans_CN")
@@ -171,7 +183,7 @@ struct ManualEntryView: View {
                             Text(EntryRow.amountText(s, item: vm.selectedItem))
                                 .font(.body.monospacedDigit())
                                 .foregroundStyle(s.amount < 0 ? theme.tertiaryText : theme.primaryText)
-                            Text("\(EntryRow.timeText(s)) · \(EntryRow.sourceText(s)) · \(s.deviceName)")
+                            Text(EntryRow.metaText(s, thisDevice: vm.thisDevice))
                                 .font(.caption)
                                 .foregroundStyle(theme.tertiaryText)
                         }
