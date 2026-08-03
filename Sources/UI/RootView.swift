@@ -4,6 +4,7 @@ import SwiftUI
 struct RootView: View {
     let env: AppEnvironment
 
+    @Environment(\.theme) private var theme
     @State private var path = NavigationPath()
     @State private var recovery: RecoveryCoordinator
     @State private var today: TodayViewModel
@@ -73,6 +74,10 @@ struct RootView: View {
                 // 弹窗挂在外层的 NavigationStack 上——加在被禁用的子树里，
                 // 连「记上」按钮都会点不动。
                 .disabled(!Self.isReady(recovery))
+                // 「记录只在这台设备上」这件事非说不可，但只在真出事时说。
+                // 挂 `safeAreaInset` 而不是塞进 `TodayView`：这不是今日的账，
+                // 是整个库的状态，不该混进那一页的列表语义里。
+                .safeAreaInset(edge: .bottom) { syncNotice }
                 // 底色挂在栈**内部**每一页上，不能只挂在栈外的 `.themed()` 里——
                 // `NavigationStack` 自己那层不透明系统底会把它整个盖住。详见 `PageBackground`。
                 .pageBackground()
@@ -96,6 +101,25 @@ struct RootView: View {
             // 先把话说完，再把没裁决完的那些重新支起来——两个 alert 不抢同一块屏。
             Button("知道了") { failure = nil; syncRecoveryPrompt() }
         } message: { Text(failure ?? "") }
+    }
+
+    /// 「记录只在这台设备上」——**闷声降级是本产品最怕的形状**，所以非说不可。
+    /// 但只在真出事时说：路通着就一个字都不说（`LedgerSyncStatus.notice` 返回 nil）。
+    ///
+    /// ⚠️ 用 `secondaryText` 而不是红色警示：这不是用户做错了什么，
+    /// 也不是他此刻能修好的事。吓唬他没有用，把事实摆出来就够了。
+    @ViewBuilder
+    private var syncNotice: some View {
+        if let text = env.syncStatus.notice {
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(theme.secondaryText)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(.thinMaterial)
+        }
     }
 
     @ViewBuilder

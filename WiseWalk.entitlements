@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ⛔ 这个文件在本机上一个字节都没生效过，也没法生效。
+
+  `project.yml` 里 `CODE_SIGNING_ALLOWED: NO`，而 entitlements 只在**签名那一刻**
+  才被读取。本机只有一张 Apple Development 证书、没有 provisioning profile，
+  CloudKit capability 需要付费开发者账号（$99/年）。
+
+  实测过缺这个文件时会发生什么：`cloudKitDatabase: .automatic` 是**彻底的空操作**——
+  容器照样建得起、不抛错，库文件里连一张 CloudKit 特征表都不会多。
+  也就是说 App 不会砖，但**同步一个字节没走，而用户毫不知情**。
+  这正是本产品最怕的形状，所以 `ModelContainerFactory.openLedger` 的降级理由
+  必须一路交到界面上说出来，`LedgerSyncStatus` 也绝不许说「已备份」。
+
+  真机 + 付费账号到位后要验的：容器 ID 与 App ID 对得上、首次同步真的上传了记录、
+  两台设备各记一笔能求和。**在那之前，任何「同步已就绪」的说法都是编的。**
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.developer.icloud-container-identifiers</key>
+	<array>
+		<string>iCloud.com.msebilly.wisewalk</string>
+	</array>
+	<key>com.apple.developer.icloud-services</key>
+	<array>
+		<string>CloudKit</string>
+	</array>
+	<!--
+	  CloudKit 靠静默推送通知设备「那边有新东西」。没有它，同步只在 App 起来时轮询。
+	  这里**不要** `UIBackgroundModes: remote-notification`：那是后台执行权限，
+	  App Store 会追问用途，而本产品定位是**备份**不是实时协作
+	  （§5.1「秒级到分钟级，不保证实时」），前台同步够用。
+	-->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>
