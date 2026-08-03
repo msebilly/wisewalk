@@ -45,6 +45,7 @@ make install-sim              # 编译并装进当前开着的模拟器
 | `04-migration-duration` | `6c12439` `08fb0ba` | 计时类的以往累计按时分问，不是问秒 |
 | `05-chinese-only` | `35e8117` | 界面里不许冒 `Edit` / `Cancel` |
 | `05-chinese-info` | 本机记的那些不必每行都报一遍机器名 | 流水那行小字里不许冒 `iPhone·XXXX` |
+| `07-timer` | 走时和今日两个数得分得出哪个是哪个 | 小号自报「今日」，且读屏软件拿得到两个数 |
 | `06-postpone-then-manual` | `837ebc1` | 推迟之后他自己补记过，再问时得说出账上已有的数（由 `06-postpone.sh` 驱动）|
 
 ## 这张网真咬得住吗
@@ -56,6 +57,7 @@ make install-sim              # 编译并装进当前开着的模拟器
 | 把 `fe8aeb6` 退回去（`showRecovery = !pending.isEmpty`，从 true 又写成 true）| 03 在**答完第一份之后**红，脚本另报「还剩 1 份草稿没裁决」 |
 | 迁移页 `syncDial` 写 `hours*60+minutes`（当成分钟）| 04 红在 `已经记过以往累计 3 小时` |
 | `metaText` 去掉 `!= thisDevice`（本机记的也报机器名）| 05-chinese-info 红在 `.*iPhone.*` 竟然可见 |
+| 计时页删掉 `.accessibilityValue(...)` | 07-timer 红。**这一口专挑单元测试够不着的那一段**：`subtitleText` 是纯函数、单元测试钉得死，但「视图有没有真去调它」「读屏软件拿不拿得到」只有跑真机才知道 |
 | `accept/discard` 不刷新「账上已有的数」| 单元测试红（`这个数得跟着队头的那一份走`）|
 | 「那一笔要落的那天」换成「今天」| 单元测试红（`昨晚崩的今早问要摆昨天的账不是今天的`）|
 

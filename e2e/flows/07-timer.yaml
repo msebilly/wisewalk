@@ -1,0 +1,18 @@
+# 计时器这条路从前一条 e2e 都没有，而它是两条录入路之一。
+#
+# 盯两件事：
+# ① 小号那个数得自报「今日」。它和大号都是 `H:MM`，当天头一坐时两者恒等，
+#    没有标签就分不出哪个是哪个（读屏软件念出来的是两个赤裸的时刻）。
+# ② 收坐之后今日页要认得「坐数」——用户点名要的是时间和坐数两个数。
+appId: com.msebilly.wisewalk
+---
+- runFlow: subflows/new-duration-item.yaml
+- tapOn: "打坐"
+- assertVisible: "不限时"
+- tapOn: "开始"
+# 「今日」两个字必须在。这一句同时验了无障碍：Maestro 读的就是无障碍树，
+# 它看得见 = 读屏软件念得出（自查 ㉓）。
+- extendedWaitUntil: { visible: ".*今日 0:0.*", timeout: 12000 }
+- assertVisible: ".*本次 0:0.*"
+- tapOn: "结束并记录"
+- extendedWaitUntil: { visible: ".*1 坐.*", timeout: 6000 }

@@ -137,6 +137,9 @@ struct TimerView: View {
                 .font(.subheadline.monospacedDigit())
                 .foregroundStyle(theme.secondaryText)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("走时")
+        .accessibilityValue(Self.spokenValue(clock: vm.clockText, subtitle: subtitle))
     }
 
     /// 起坐前的倒计时档位选择。§6.3.1。
@@ -370,12 +373,35 @@ struct TimerView: View {
     ///
     /// 「时间和坐数量」是用户点名要的两个数。坐数在这一页尤其有用——
     /// 早课坐一回、晚课坐一回，只看总时长分不出是坐了两回还是一回坐了两倍长。
-    /// 本轮还没记上，所以说的是「今日 N 坐」，收坐之后才 +1。
+    /// 本轮还没记上，说的是收坐之前的坐数，收坐之后才 +1。
     private var subtitle: String {
-        let progress = FulfillmentBadge.progressText(total: vm.dayTotal, goal: vm.item.dailyGoal,
-                                                     unit: vm.item.unit, measureType: vm.item.measureType)
-        guard vm.dayRounds > 0 else { return progress }
-        return "\(progress) · 今日 \(vm.dayRounds) 坐"
+        Self.subtitleText(dayTotal: vm.dayTotal, goal: vm.item.dailyGoal,
+                          unit: vm.item.unit, measureType: vm.item.measureType,
+                          rounds: vm.dayRounds)
+    }
+
+    /// **「今日」两个字不能省。** 这一页摞着两个 `H:MM`：大号是本轮走时，
+    /// 小号是今日已记。当天头一坐时两者恒等（今日 = 0 + 本轮），
+    /// 同一个数印了两遍；第二坐起才分家，而那时用户没有任何依据判断哪个是哪个。
+    ///
+    /// 计数器页早把这件事做对了：大号是今日，本轮另配「本次 N」的标签。
+    /// 这一页把两个数对调了，标签却没跟着搬过来。
+    ///
+    /// 「· N 坐」的拼法交给 `progressText`，这里不再拼第二遍——
+    /// 拼两遍就会有两种说法（本仓库为此栽过三次）。
+    nonisolated static func subtitleText(dayTotal: Int, goal: Int?, unit: String,
+                                         measureType: MeasureType, rounds: Int) -> String {
+        "今日 " + FulfillmentBadge.progressText(total: dayTotal, goal: goal, unit: unit,
+                                               measureType: measureType, rounds: rounds)
+    }
+
+    /// 读屏软件听到的那一句。
+    ///
+    /// 这一页从前**零无障碍标注**，于是 VoiceOver 把两个 `Text` 念成两个赤裸的时刻
+    /// （「十比零零」「四十比零零」），看不见屏幕的人分不出哪个是哪个——
+    /// 而这两个数正是他唯一能拿到的信息。
+    nonisolated static func spokenValue(clock: String, subtitle: String) -> String {
+        "本次 \(clock)，\(subtitle)"
     }
 
     /// 通知权限延后到**用户第一次真的设倒计时**这一刻才要。§6.3.1 定案二。
