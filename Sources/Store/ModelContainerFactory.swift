@@ -12,6 +12,25 @@ import SwiftData
 ///
 /// 新增**同步**实体只需改 `syncedModels`，`CloudKitConstraintTests`
 /// 会自动把它纳入 §4.6 四条约束与属性白名单的检查范围。
+/// 账本库走不走 iCloud。**只管账本，草稿永远不走**（理由见 `SessionDraft`）。
+///
+/// 这是个参数而不是编译期常量，为的是让「拨这个开关会不会动到用户已有的功课」
+/// 变成一条跑得起来的测试。拨开关这件事本身没法回滚——
+/// 用户的历史一旦没了就是没了，只能事前证明它不会没。
+enum LedgerSync {
+    /// 账本经 CloudKit 在用户自己的设备间同步。
+    case iCloud
+    /// 账本只留本机。第 3 卷之前的行为；测试与「用户关掉了同步」都走这条。
+    case thisDeviceOnly
+
+    var database: ModelConfiguration.CloudKitDatabase {
+        switch self {
+        case .iCloud: .automatic
+        case .thisDeviceOnly: .none
+        }
+    }
+}
+
 enum ModelContainerFactory {
     static let syncedModels: [any PersistentModel.Type] = [
         PracticeItem.self,
@@ -69,7 +88,8 @@ enum ModelContainerFactory {
     /// `baseDirectory` 有默认值，生产调用处不必传；开个口子是为了让测试
     /// 能指向临时目录，从而真正验证「草稿库确实落在被排除的子目录里」——
     /// 只测 `excludeFromBackup` 这个函数本身，证明不了 `onDisk` 真的调了它。
-    static func onDisk(baseDirectory: URL = URL.applicationSupportDirectory) throws -> ModelContainer {
+    static func onDisk(baseDirectory: URL = URL.applicationSupportDirectory,
+                       ledgerSync: LedgerSync = .thisDeviceOnly) throws -> ModelContainer {
         let localDir = baseDirectory.appending(path: "LocalOnly", directoryHint: .isDirectory)
         let fm = FileManager.default
         try fm.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
@@ -80,7 +100,7 @@ enum ModelContainerFactory {
             configurations:
                 ModelConfiguration("synced", schema: syncedSchema,
                                    url: baseDirectory.appendingPathComponent("WiseWalk.store"),
-                                   cloudKitDatabase: .none),
+                                   cloudKitDatabase: ledgerSync.database),
                 ModelConfiguration("localOnly", schema: localSchema,
                                    url: localDir.appendingPathComponent("WiseWalkLocal.store"),
                                    cloudKitDatabase: .none)

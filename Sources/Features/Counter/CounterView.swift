@@ -23,6 +23,16 @@ struct CounterView: View {
     /// 跨过 999→1000 时整行会跳一下，正是 `.monospacedDigit()` 要治的毛病。
     static func bigNumberText(_ n: Int) -> String { String(n) }
 
+    /// 计数区念给读屏软件的用法提示。
+    ///
+    /// ⛔ **从前这里写的是「轻点加一，长按批量增加」。** 那句话是念给 VoiceOver
+    /// 用户听的，而**读屏模式下长按被系统接管，他做不出这个手势**——
+    /// 听得见，却永远做不到。说了做不到，比不说更坏（与 §6.3.1
+    /// 「半真的承诺比不承诺更坏」是同一条）。
+    ///
+    /// 批量增加改由控件区一个**看得见也点得着**的按钮承担，长按只作为明眼人的捷径保留。
+    static let countingHint = "轻点加一"
+
     var body: some View {
         countingSurface
             .safeAreaInset(edge: .bottom) { controls }
@@ -82,15 +92,19 @@ struct CounterView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
         .onTapGesture { perform { try vm.tap() } }
-        .onLongPressGesture(minimumDuration: 0.5) {
-            batchStep = vm.batchStep
-            showBatch = true
-        }
+        .onLongPressGesture(minimumDuration: 0.5) { openBatch() }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("计数区")
         .accessibilityValue(subtitle)
-        .accessibilityHint("轻点加一，长按批量增加")
+        .accessibilityHint(Self.countingHint)
         .accessibilityAddTraits(.isButton)
+    }
+
+    /// 拨念珠念的那些要一次记进来，走这里。
+    /// 计数器上一下一下点得出来的数，和念珠上已经念完的数，是两件事。
+    private func openBatch() {
+        batchStep = vm.batchStep
+        showBatch = true
     }
 
     /// 结束与撤销。**不在计数区内**。
@@ -104,6 +118,14 @@ struct CounterView: View {
             }
             .buttonStyle(.bordered)
             .disabled(vm.count == 0)
+
+            // 念珠上已经念完的那些一次记进来。**从前只有隐藏的长按**，
+            // 而读屏用户做不出长按——这个按钮是他唯一够得着的路。
+            Button { openBatch() } label: {
+                Label("加一批", systemImage: "plus.rectangle.on.rectangle")
+                    .frame(minHeight: 44)
+            }
+            .buttonStyle(.bordered)
 
             Spacer()
 

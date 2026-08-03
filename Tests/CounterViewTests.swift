@@ -65,3 +65,30 @@ private func makeCounterEnv() throws -> (AppEnvironment, PracticeItem) {
     #expect(CounterView.bigNumberText(0) == "0")
     #expect(CounterView.bigNumberText(108) == "108")
 }
+
+// MARK: - 拨念珠念的那些，怎么记进来（2026-08-03）
+
+@Test func 批量增加的按钮上写的数就是要加的数() {
+    // 屏幕说的和做的必须是同一件事。这是唯一一处告诉用户「这一下要加多少」的地方，
+    // 按下去之后就进账本了，没有第二次确认。
+    #expect(BatchSheet.confirmText(500) == "加 500")
+    #expect(BatchSheet.confirmText(324) == "加 324")
+}
+
+@Test func 数写不出来时不许按加() {
+    // `numericText` 把空框映射成 0，而 `setBatchStep` 会 `max(1,)` 把 0 抬成 1。
+    // 不禁用的话，按钮上写着「加 0」、实际加 1——**方向是「多」**。
+    #expect(BatchSheet.canConfirm(0) == false, "空框还能按，按下去会凭空多一声")
+    #expect(BatchSheet.canConfirm(-3) == false)
+    #expect(BatchSheet.canConfirm(1) == true)
+    #expect(BatchSheet.canConfirm(324) == true)
+}
+
+@Test func 计数区的提示不许承诺读屏用户做不到的手势() {
+    // 「长按批量增加」这句话是念给 VoiceOver 用户听的，
+    // 而读屏模式下长按被系统接管，他**做不到**。
+    // 说了做不到，比不说更坏（§6.3.1「半真的承诺比不承诺更坏」是同一条）。
+    #expect(!CounterView.countingHint.contains("长按"),
+            "提示里还在教用户做一个他做不出来的手势")
+    #expect(CounterView.countingHint.contains("轻点"), "轻点加一这件事还是得说")
+}
