@@ -44,6 +44,29 @@ ww_wait_for_quiet() {
 
 ww_wait_for_quiet || exit 1
 
+# ⛔ 第三道，也是唯一挡得住「别的项目在用同一台模拟器」的一道。
+#
+# 实测：邻居项目往同一台 iPhone 17 上装 `Horcrux`/`DTest`/`MTest`/`VTest` 跑测试，
+# 把慧行连人带数据一起掀了——屏幕停在桌面，图标还是灰的。这时候 8 条 flow 红 6 条,
+# 而机器负载只有 6，前两道闸一道都拦不住。
+#
+# 报「没过」是**说谎**：flow 没问题，代码没问题，是环境被抢了。
+# 所以跑之前先确认 App 在，每条 flow 红了之后再确认一次它还在——
+# 不在就整轮作废（`exit 2`），不给任何红绿判决。
+# 「残缺的跑整轮作废，不许从里面挑结论」——同 `Makefile` 那次并发事故的结论。
+APP=com.msebilly.wisewalk
+UDID="${WW_SIM_UDID:-$(xcrun simctl list devices booted | grep -oE '[0-9A-F]{8}-[0-9A-F-]{27}' | head -1)}"
+ww_app_present() { xcrun simctl get_app_container "$UDID" "$APP" >/dev/null 2>&1; }
+
+if [ -z "${UDID}" ]; then
+  echo "✘ 没有开着的模拟器。先 xcrun simctl boot <UDID>。"
+  exit 1
+fi
+if ! ww_app_present; then
+  echo "✘ 模拟器 ${UDID} 上没装慧行。先 make install-sim。"
+  exit 1
+fi
+
 # 负载是第二道信号：xcodebuild 收工了但机器仍在喘的话照样会假红。
 # 阈值按核数取（每核 1.0 就算跑满），不写死一个拍脑袋的数——
 # 换台机器那个数就不对了，而不对的闸门比没有闸门更坏。
@@ -75,6 +98,12 @@ for f in flows/[0-9]*.yaml; do
   maestro test "$f" 2>&1 | grep -v '^WARNING' | tail -25
   # maestro 的退出码在管道里丢了，用 PIPESTATUS 取
   if [ "${PIPESTATUS[0]}" != "0" ]; then
+    if ! ww_app_present; then
+      echo ""
+      echo "⛔ 跑到一半 App 从模拟器上没了——多半是别的项目在用同一台模拟器。"
+      echo "   这一轮**整轮作废**，$name 这个红不算数。等对方收工，make install-sim 之后重跑。"
+      exit 2
+    fi
     echo "✘ $name 没过"
     failed=1
   fi
