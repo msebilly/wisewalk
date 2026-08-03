@@ -9,6 +9,21 @@ APP=com.msebilly.wisewalk
 #    挨着中文的变量一律写 `${UDID}` 而不是 `$UDID`。
 UDID="${WW_SIM_UDID:-$(xcrun simctl list devices booted | grep -oE '[0-9A-F]{8}-[0-9A-F-]{27}' | head -1)}"
 
+# ⛔ 一律带 `--device`。开着两台模拟器时 maestro 会自己挑一台，
+# 而 sqlite 查的是 `${UDID}` 那一台——flow 在 A 上建课、脚本去 B 上查，
+# 于是报「库里没有定课，建课那步其实没落库」，而建课明明成功了。
+# 实测就是这么被坑的（邻居项目占着 356A…，慧行单开了 07E3…）。
+#
+# ⚠️ 退出码必须自己接回来。裸写 `maestro | grep` 的话，函数返回的是 **grep** 的
+# 退出码——maestro 红了 grep 照样返回 0，于是「没过」变成「过了」。
+# 这是本仓库记过的假绿形状（`Makefile` 那次 `|| true` 同源），抽这个函数时又踩了一次。
+ww_maestro() {
+  local rc
+  maestro --device "$UDID" test "$@" 2>&1 | grep -v '^WARNING'
+  rc="${PIPESTATUS[0]}"
+  return "$rc"
+}
+
 ww_paths() {
   local c; c="$(xcrun simctl get_app_container "$UDID" "$APP" data)"
   MAIN="$c/Library/Application Support/WiseWalk.store"
@@ -45,7 +60,7 @@ UPDATE Z_PRIMARYKEY SET Z_MAX=$((pk - 1)) WHERE Z_NAME='SessionDraft';"
 
 # ww_new_item count|duration —— 清干净，立一门课。
 ww_new_item() {
-  maestro test "flows/subflows/new-$1-item.yaml" 2>&1 | grep -v '^WARNING' | tail -2
+  ww_maestro "flows/subflows/new-$1-item.yaml" | tail -2
   [ "${PIPESTATUS[0]}" != "0" ] && { echo "✘ 建课那步就没过"; return 1; }
   return 0
 }

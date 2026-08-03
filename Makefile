@@ -44,8 +44,9 @@ build: guard gen
 # 而漏装的后果是**拿旧版跑出一片绿**——比没跑更坏。
 install-sim: build
 	@set -e; \
-	udid="$$(xcrun simctl list devices booted | grep -oE '[0-9A-F]{8}-[0-9A-F-]{27}' | head -1)"; \
+	udid="$${WW_SIM_UDID:-$$(xcrun simctl list devices booted | grep -oE '[0-9A-F]{8}-[0-9A-F-]{27}' | head -1)}"; \
 	if [ -z "$$udid" ]; then echo "✘ 没有开着的模拟器，先 xcrun simctl boot 'iPhone 17'"; exit 1; fi; \
+	xcrun simctl bootstatus "$$udid" -b >/dev/null 2>&1 || xcrun simctl boot "$$udid" >/dev/null 2>&1 || true; \
 	app="$$(xcodebuild -project $(PROJ) -scheme WiseWalk -destination '$(DEST)' -showBuildSettings 2>/dev/null \
 	        | awk -F' = ' '/ BUILT_PRODUCTS_DIR =/{d=$$2} / FULL_PRODUCT_NAME =/{n=$$2} END{print d"/"n}')"; \
 	if [ ! -d "$$app" ]; then echo "✘ 找不到 $$app"; exit 1; fi; \

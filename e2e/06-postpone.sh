@@ -9,7 +9,7 @@ echo "▶ 06-postpone-then-manual（模拟器 ${UDID}）"
 ww_new_item count || exit 1
 ww_seed_drafts 108 || exit 1
 
-maestro test flows/06-postpone-then-manual.yaml 2>&1 | grep -v '^WARNING' | tail -30
+ww_maestro flows/06-postpone-then-manual.yaml | tail -30
 code="${PIPESTATUS[0]}"
 
 # 收尾取证：账上必须是 **108**，不是 216。这条 flow 防的就是那个 216。

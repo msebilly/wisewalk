@@ -189,3 +189,25 @@ flow 之间要各自自包含（`runFlow: subflows/…` + `launchApp: {clearStat
 三道闸都验过会拦人（阈值/包名临时改坏，各自报对了话并给出非零退出码）。
 
 想彻底躲开就给慧行单开一台模拟器，用 `WW_SIM_UDID` 指过去。
+
+### 单开一台模拟器（推荐）
+
+```bash
+xcrun simctl create WiseWalk-e2e "iPhone 17"     # 记下 UDID
+export WW_SIM_UDID=<那个 UDID>
+xcrun simctl boot "$WW_SIM_UDID"
+make install-sim && ./e2e/run.sh
+```
+
+`Makefile` 的 `install-sim`、`run.sh`、`lib.sh` 三处都认这个环境变量，
+不设就沿用「第一台开着的模拟器」。
+
+⛔ **开着两台模拟器时，`maestro test` 不带 `--device` 会自己挑一台。**
+挑中的未必是装着当前构建的那一台——03/06 因此报「建课那步就没过」，
+而建课明明成功了：**flow 在 A 上建的课，脚本去 B 上查的库。**
+所有 maestro 调用一律走 `ww_maestro`（`lib.sh`），它把设备钉死。
+
+⚠️ 抽 `ww_maestro` 时当场又造了一个假绿：`maestro | grep -v WARNING` 的
+退出码是 **grep 的**，maestro 红了 grep 照样返回 0。已用 `PIPESTATUS[0]`
+接回来，并拿一条必然失败的 flow 验过（接回来的退出码 1）。
+`Makefile` 那次 `|| true` 是同一个病。

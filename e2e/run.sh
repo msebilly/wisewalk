@@ -95,7 +95,9 @@ for f in flows/[0-9]*.yaml; do
   echo ""
   echo "▶ $name"
   # grep 掉 JVM 的 WARNING 噪声，它每次都刷十几行
-  maestro test "$f" 2>&1 | grep -v '^WARNING' | tail -25
+  # ⛔ `--device` 不能省。开着两台模拟器时 maestro 自己挑一台，
+  # 挑中的未必是装着当前构建的那一台——红了也不是代码的错。
+  maestro --device "$UDID" test "$f" 2>&1 | grep -v '^WARNING' | tail -25
   # maestro 的退出码在管道里丢了，用 PIPESTATUS 取
   if [ "${PIPESTATUS[0]}" != "0" ]; then
     if ! ww_app_present; then

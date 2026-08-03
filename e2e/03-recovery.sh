@@ -14,7 +14,7 @@ ww_new_item count || exit 1
 ww_seed_drafts 108 21 || exit 1
 
 # 3. 验。
-maestro test flows/03-recovery-alert.yaml 2>&1 | grep -v '^WARNING' | tail -30
+ww_maestro flows/03-recovery-alert.yaml | tail -30
 code="${PIPESTATUS[0]}"
 
 # 4. 收尾：两份都答完了，草稿该是空的。答不完就是死锁又回来了。
