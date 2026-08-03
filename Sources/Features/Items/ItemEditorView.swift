@@ -69,6 +69,9 @@ struct ItemEditorView: View {
                             .multilineTextAlignment(.trailing)
                             .font(.body.monospacedDigit())
                             .frame(maxWidth: 120)
+                            // 同上：旁边的「自定」是独立 `Text`，
+                            // 读屏软件念到这儿是「不设目标」——那是占位符，不是这个框在问什么。
+                            .accessibilityLabel("每日目标")
                             .onChange(of: goalText) { _, t in vm.goalDisplay = Int(t) }
                     }
                 } header: {

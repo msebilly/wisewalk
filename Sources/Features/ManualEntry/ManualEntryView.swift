@@ -143,6 +143,10 @@ struct ManualEntryView: View {
                         .multilineTextAlignment(.trailing)
                         .font(.body.monospacedDigit())
                         .frame(maxWidth: 120)
+                        // 旁边那个「数量」是独立的 `Text`，跟这个框毫无关联，
+                        // 读屏软件念到这儿只有孤零零一个「0」（占位符当了名字）。
+                        // 迁移页那三个框补过同一条（`9802c5d`），**这一处漏了**。
+                        .accessibilityLabel("数量")
                 }
             }
 
