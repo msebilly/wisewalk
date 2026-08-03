@@ -48,7 +48,7 @@ final class DraftStore {
         let draft = SessionDraft(itemID: itemID, amount: 0,
                                  startedAt: now, updatedAt: now, source: source)
         context.insert(draft)
-        try context.save()
+        try context.saveOrRollback()
         return draft
     }
 
@@ -59,14 +59,14 @@ final class DraftStore {
     func update(_ draft: SessionDraft, amount: Int, at now: Date = Date()) throws {
         draft.amount = amount
         draft.updatedAt = now
-        try context.save()
+        try context.saveOrRollback()
     }
 
     /// 只打心跳，不动量也不动起始时刻。计时器用——
     /// 它的量由时间差推算，但需要 `updatedAt` 作崩溃后的「App 活到几点」估计。
     func touch(_ draft: SessionDraft, at now: Date = Date()) throws {
         draft.updatedAt = now
-        try context.save()
+        try context.saveOrRollback()
     }
 
     /// 提交：写一笔流水并清掉草稿，**同一次 save**（§4.5 第 1 条）。
@@ -95,24 +95,16 @@ final class DraftStore {
             id: draft.sessionID
         )
         context.delete(draft)
-        do {
-            try context.save()
-        } catch {
-            // 实测（SDK 26.5）：save 抛错时 store 会一致地回滚，但 context 的 pending
-            // 改动**不会**被清掉。若就这么把错抛出去，那半截「写流水 + 删草稿」的意图
-            // 会一直挂在 context 里，被下一次**无关的** save() 顺手提交。
-            // 最坏的一条路：commit 失败 → 界面提示「记录失败」→ 用户点「放弃」→
-            // discard 里那次 save 把残留的流水一并落盘 → 用户明明放弃了却记上了一笔。
-            context.rollback()
-            throw error
-        }
+        // 「写流水 + 删草稿」必须进同一次 save（§4.5 第 1 条），
+        // 失败要把这半截意图整个撤掉——否则用户点「放弃」时那次 save 会把它捡起来落盘。
+        try context.saveOrRollback()
         return session
     }
 
     /// 丢弃草稿，不产生任何流水。用户主动放弃时走这里。
     func discard(_ draft: SessionDraft) throws {
         context.delete(draft)
-        try context.save()
+        try context.saveOrRollback()
     }
 
     // MARK: - 读
@@ -148,7 +140,7 @@ final class DraftStore {
                 live.append(draft)
             }
         }
-        if deletedAny { try context.save() }
+        if deletedAny { try context.saveOrRollback() }
         return live
     }
 }

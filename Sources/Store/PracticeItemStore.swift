@@ -99,7 +99,7 @@ final class PracticeItemStore {
             updatedAt: now
         )
         context.insert(item)
-        try context.save()
+        try context.saveOrRollback()
         return item
     }
 
@@ -179,13 +179,13 @@ final class PracticeItemStore {
         item.iconName = iconName
         item.colorHex = colorHex
         item.updatedAt = now
-        try context.save()
+        try context.saveOrRollback()
     }
 
     func archive(_ item: PracticeItem, at now: Date = Date()) throws {
         item.isArchived = true
         item.updatedAt = now
-        try context.save()
+        try context.saveOrRollback()
     }
 
     /// 恢复归档。**`activatedAt` 必须跟着更新**——它记的是「最近一次成为活跃状态」，
@@ -201,7 +201,7 @@ final class PracticeItemStore {
         item.isArchived = false
         item.activatedAt = now
         item.updatedAt = now
-        try context.save()
+        try context.saveOrRollback()
     }
 
     /// 拖拽结束后调用，按传入顺序重排 `sortOrder`。
@@ -210,7 +210,7 @@ final class PracticeItemStore {
             item.sortOrder = index
             item.updatedAt = now
         }
-        try context.save()
+        try context.saveOrRollback()
     }
 
     // MARK: - 内部
