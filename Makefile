@@ -8,7 +8,7 @@ PROJ := WiseWalk.xcodeproj
 # guard 还没失败退出时就把 gen 跑起来。这一行让并行调用也退回串行。
 .NOTPARALLEL:
 
-.PHONY: guard gen build test clean
+.PHONY: guard gen build install-sim test clean
 
 # 这道闸必须落在 `gen` **之前**。
 #
@@ -38,6 +38,19 @@ gen: guard
 
 build: guard gen
 	xcodebuild build -project $(PROJ) -scheme WiseWalk -destination '$(DEST)' -quiet
+
+# e2e 每跑一轮都要先把新版装进模拟器（`e2e/README.md`）。
+# 手敲那三步（build → 从 build settings 里刨出 .app → install）每次都要查一遍，
+# 而漏装的后果是**拿旧版跑出一片绿**——比没跑更坏。
+install-sim: build
+	@set -e; \
+	udid="$$(xcrun simctl list devices booted | grep -oE '[0-9A-F]{8}-[0-9A-F-]{27}' | head -1)"; \
+	if [ -z "$$udid" ]; then echo "✘ 没有开着的模拟器，先 xcrun simctl boot 'iPhone 17'"; exit 1; fi; \
+	app="$$(xcodebuild -project $(PROJ) -scheme WiseWalk -destination '$(DEST)' -showBuildSettings 2>/dev/null \
+	        | awk -F' = ' '/ BUILT_PRODUCTS_DIR =/{d=$$2} / FULL_PRODUCT_NAME =/{n=$$2} END{print d"/"n}')"; \
+	if [ ! -d "$$app" ]; then echo "✘ 找不到 $$app"; exit 1; fi; \
+	xcrun simctl install "$$udid" "$$app"; \
+	echo "✔ 已装进 $$udid"
 
 # 成败以 **xcodebuild 自己的退出码** 为准。
 #

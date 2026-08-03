@@ -24,7 +24,7 @@
 
 ```bash
 brew install maestro          # 或 curl -Ls 'https://get.maestro.mobile.dev' | bash
-make build-sim                # 装到模拟器
+make install-sim              # 编译并装进当前开着的模拟器
 ./e2e/run.sh                  # 跑全部
 ./e2e/run.sh 03               # 只跑 03
 ```
@@ -44,6 +44,21 @@ make build-sim                # 装到模拟器
 | `03-recovery-alert` | `95ee7fc` `fe8aeb6` | **弹窗关掉之后界面还点得动**（由 `03-recovery.sh` 驱动，见下）|
 | `04-migration-duration` | `6c12439` `08fb0ba` | 计时类的以往累计按时分问，不是问秒 |
 | `05-chinese-only` | `35e8117` | 界面里不许冒 `Edit` / `Cancel` |
+
+## 这张网真咬得住吗
+
+不问「它跑绿了吗」，问「它红得起来吗」——两个变异实测：
+
+| 变异 | 结果 |
+|---|---|
+| 把 `fe8aeb6` 退回去（`showRecovery = !pending.isEmpty`，从 true 又写成 true）| 03 在**答完第一份之后**红，脚本另报「还剩 1 份草稿没裁决」 |
+| 迁移页 `syncDial` 写 `hours*60+minutes`（当成分钟）| 04 红在 `已经记过以往累计 3 小时` |
+
+第二条值得多看一眼：变异之后「小时」「分」两个标签**照样在**，
+01/02/05 也照样绿——**红的是账上那个数**。
+断言挑「3 小时」而不是挑标签，这一步没白挑。
+
+改动这几条 flow 之后，请照样咬一口再信它。
 
 ## 写 flow 的几条经验
 
