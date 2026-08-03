@@ -141,3 +141,34 @@ sqlite3 "$C/.../WiseWalk.store" \
 **`run.sh` 用 `flows/[0-9]*.yaml` 遍历**，不然会把 `subflows/` 里的当独立 flow 跑。
 flow 之间要各自自包含（`runFlow: subflows/…` + `launchApp: {clearState: true}`），
 不然前一条留下的草稿会挡住后一条——踩过。
+
+## ⛔ 机器忙的时候跑出来的红绿，一个都不算数
+
+2026-08-03 实测：邻居项目在跑变异循环（load average 22）时连跑两轮，
+**红的每轮换一批**——
+
+| 轮次 | 红的 |
+|---|---|
+| 第一轮 | `05-chinese-only` `07-timer` `06-postpone` |
+| 第二轮 | `02-counter-exact` `04-migration` `05-chinese-only` `07-timer` `03-recovery` |
+
+同一份代码，机器闲下来再跑**全绿**。Maestro 的每一步都带超时，
+机器一慢就判成「没找着那个元素」。
+
+**红是假的，绿更可疑。** `assertNotVisible` 在页面根本没渲染出来时会**凭空通过**
+——而这一套里 `05-chinese-only`（不许有 `Edit`/`Cancel`）、
+`05-chinese-info`（不许有 `iPhone`）恰恰都是这个形状。
+所以那两条 flow 的 `assertNotVisible` 前面都先钉了一句 `assertVisible`：
+先证明页面确实渲染出来了，那句「不许有」才有内容。
+
+`run.sh` 因此**忙就不跑**（不是「等一等再跑」）：
+
+- 等 `xcodebuild` 连着三次不在（变异循环在两次编译之间有空档，查一次会漏）
+- 一分钟负载 ≥ 核数就直接 `exit 1`
+
+出一个没人敢信的判决比不出判决更坏。`Makefile` 的 `test` 目标为同一个理由
+早就设过同一道闸——`run.sh` 一直缺着。
+
+⚠️ 顺带又踩了一次 bash 3.2：`"负载 $load，太忙"` 里那个**中文逗号**的高位字节
+被当成变量名的一部分，`set -u` 报 `load?: unbound variable`。
+**挨着中文标点的变量一律写 `${load}`。** 这条 README 里记过，还是又犯了。
