@@ -191,10 +191,11 @@ struct 同步状态Tests {
             (.available, "iCloud 账户可用"),
             (.noAccount, "这台设备目前无法使用 iCloud · 未登录 iCloud"),
             (.restricted, "这台设备目前无法使用 iCloud · iCloud 账户受限"),
-            (.couldNotDetermine, "这台设备目前无法使用 iCloud · 无法确定 iCloud 账户状态"),
-            (.temporarilyUnavailable, "这台设备目前无法使用 iCloud · iCloud 暂时不可用"),
+            (.couldNotDetermine, "无法确定 iCloud 账户状态"),
+            (.temporarilyUnavailable, "iCloud 暂时不可用"),
+            (.unverifiedBuild, "当前构建未验证 iCloud 能力"),
             (.accountLookupFailed(reason: "无法连接账户服务"),
-             "这台设备目前无法使用 iCloud · 无法查询 iCloud 账户"),
+             "iCloud 账户查询失败 · 状态未知"),
             (.localOnly(reason: "容器 ID 对不上"),
              "当前使用本地账本 · iCloud 数据库未能打开"),
             (.localOnly(reason: nil),
@@ -248,7 +249,7 @@ struct 同步状态Tests {
             "只留本机", "没有远端", "无远端", "iCloud 上没有", "未上传到 iCloud"
         ]
         let 每一档: [LedgerSyncStatus] = [
-            .noAccount, .restricted, .couldNotDetermine, .temporarilyUnavailable,
+            .noAccount, .restricted, .couldNotDetermine, .temporarilyUnavailable, .unverifiedBuild,
             .accountLookupFailed(reason: "底层误报：记录仅在本机"),
             .localOnly(reason: nil),
             .localOnly(reason: "底层误报：记录只有这台设备有")
@@ -280,7 +281,7 @@ struct 同步状态Tests {
                      "同步已开启", "备份已开启"]
         let 每一档: [LedgerSyncStatus] = [
             .checking, .available, .noAccount, .restricted, .couldNotDetermine,
-            .temporarilyUnavailable, .accountLookupFailed(reason: "任意错因"),
+            .temporarilyUnavailable, .unverifiedBuild, .accountLookupFailed(reason: "任意错因"),
             .localOnly(reason: nil), .localOnly(reason: "任意错因")
         ]
         for 状态 in 每一档 {

@@ -41,6 +41,8 @@ codesign -d --entitlements :- "$APP"
 | `aps-environment` | `development` |
 
 缺任一项、值不同、签名校验失败或 factual account state 查不到：**立即停止**。
+若底栏仍为「当前构建未验证 iCloud 能力」，也立即停止并记构建验证闸门未通过；这句话
+不表示设备或账户不可用。
 不得用私有 `SecTask` SPI 在运行时自证 entitlement。
 
 - [ ] A/B 已记录设备标签、机型、OS、时区与各自不同的设备短码；所有定课标签带 case ID。
@@ -363,8 +365,9 @@ adjustment、两个不同 `ZID`、原 +500 仍存在；同时保留 UI 中未变
 ### RD-07 — iCloud 账户退出、切换与返回
 
 1. 用专用账户在 A 建 `RD07-ACCOUNT-A` 流水，并先在 B 逐笔确认真实传输。
-2. 在 B 退出 iCloud；等待 `.CKAccountChanged` 后，底栏必须刷新为对应的
-   `这台设备目前无法使用 iCloud · <具体原因>`，不能仍显示账户可用。此时必须明确记录：
+2. 在 B 退出 iCloud；等待 `.CKAccountChanged` 后，若账户状态为 `.noAccount`，底栏必须
+   刷新为「这台设备目前无法使用 iCloud · 未登录 iCloud」，不能仍显示账户可用；若实际
+   返回其他状态，则按 §5.2 的事实文案记录，未知或查询失败不得推断设备不可用。此时必须明确记录：
    原账户 private database 中此前的副本是否仍存在是 **UNKNOWN**；账户状态不是 locality
    证明，不能据此写“仅本机”或“远端已删除”。
 3. 若有第二个可丢弃账户，先清 B 本地 App 数据再切换，确认全新安装看不到

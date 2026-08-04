@@ -35,10 +35,11 @@ struct TodaySyncStatusTests {
         let 每一档: [(LedgerSyncStatus, String)] = [
             (.noAccount, "这台设备目前无法使用 iCloud · 未登录 iCloud"),
             (.restricted, "这台设备目前无法使用 iCloud · iCloud 账户受限"),
-            (.couldNotDetermine, "这台设备目前无法使用 iCloud · 无法确定 iCloud 账户状态"),
-            (.temporarilyUnavailable, "这台设备目前无法使用 iCloud · iCloud 暂时不可用"),
+            (.couldNotDetermine, "无法确定 iCloud 账户状态"),
+            (.temporarilyUnavailable, "iCloud 暂时不可用"),
+            (.unverifiedBuild, "当前构建未验证 iCloud 能力"),
             (.accountLookupFailed(reason: "账户服务超时"),
-             "这台设备目前无法使用 iCloud · 无法查询 iCloud 账户"),
+             "iCloud 账户查询失败 · 状态未知"),
             (.localOnly(reason: "数据库打不开"),
              "当前使用本地账本 · iCloud 数据库未能打开"),
             (.localOnly(reason: nil), "当前使用本地账本 · 未启用 iCloud")

@@ -39,6 +39,7 @@ enum LedgerSyncStatus: Equatable, Sendable {
     case restricted
     case couldNotDetermine
     case temporarilyUnavailable
+    case unverifiedBuild
     case accountLookupFailed(reason: String)
 
     /// 当前 App 使用本地账本路径；不推断此前是否已有远端副本。
@@ -67,11 +68,13 @@ enum LedgerSyncStatus: Equatable, Sendable {
         case .restricted:
             "这台设备目前无法使用 iCloud · iCloud 账户受限"
         case .couldNotDetermine:
-            "这台设备目前无法使用 iCloud · 无法确定 iCloud 账户状态"
+            "无法确定 iCloud 账户状态"
         case .temporarilyUnavailable:
-            "这台设备目前无法使用 iCloud · iCloud 暂时不可用"
+            "iCloud 暂时不可用"
+        case .unverifiedBuild:
+            "当前构建未验证 iCloud 能力"
         case .accountLookupFailed:
-            "这台设备目前无法使用 iCloud · 无法查询 iCloud 账户"
+            "iCloud 账户查询失败 · 状态未知"
         case .localOnly(.some):
             "当前使用本地账本 · iCloud 数据库未能打开"
         case .localOnly(nil):
@@ -169,6 +172,9 @@ final class LedgerSyncStatusMonitor {
             case .couldNotDetermine: status = .couldNotDetermine
             case .temporarilyUnavailable: status = .temporarilyUnavailable
             }
+        } catch CloudAccountStatusError.unsignedOrUnverifiedBuild {
+            guard generation == refreshGeneration else { return }
+            status = .unverifiedBuild
         } catch {
             guard generation == refreshGeneration else { return }
             status = .accountLookupFailed(reason: error.localizedDescription)

@@ -79,7 +79,7 @@ struct CloudAccountStatusTests {
     }
 
     @MainActor
-    @Test func thrownAccountLookupBecomesAnExplicitErrorState() async throws {
+    @Test func injectedGenericLookupFailureRemainsDistinctFromAnUnverifiedBuild() async throws {
         let opened = LedgerOpen(container: try ModelContainerFactory.inMemory(),
                                 sync: .iCloud,
                                 fallbackReason: nil)
@@ -94,7 +94,27 @@ struct CloudAccountStatusTests {
         await monitor.refresh()
 
         #expect(monitor.status == .accountLookupFailed(reason: "无法连接账户服务"))
-        #expect(monitor.status.barText == "这台设备目前无法使用 iCloud · 无法查询 iCloud 账户")
+        #expect(monitor.status.barText == "iCloud 账户查询失败 · 状态未知")
+    }
+
+    @MainActor
+    @Test func unsignedOrUnverifiedPolicyBecomesAnUnverifiedBuildStatus() async throws {
+        let opened = LedgerOpen(container: try ModelContainerFactory.inMemory(),
+                                sync: .iCloud,
+                                fallbackReason: nil)
+        let monitor = LedgerSyncStatusMonitor(
+            opened: opened,
+            accountClient: .livePolicy(
+                isVerifiedSignedDeviceBuild: false,
+                accountStatus: { .available }
+            ),
+            notificationCenter: NotificationCenter()
+        )
+
+        await monitor.refresh()
+
+        #expect(monitor.status == .unverifiedBuild)
+        #expect(monitor.status.barText == "当前构建未验证 iCloud 能力")
     }
 
     @MainActor

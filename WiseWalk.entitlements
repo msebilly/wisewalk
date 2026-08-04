@@ -28,10 +28,9 @@
 		<string>CloudKit</string>
 	</array>
 	<!--
-	  CloudKit 靠静默推送通知设备「那边有新东西」。没有它，同步只在 App 起来时轮询。
-	  这里**不要** `UIBackgroundModes: remote-notification`：那是后台执行权限，
-	  App Store 会追问用途，而本产品定位是**备份**不是实时协作
-	  （§5.1「秒级到分钟级，不保证实时」），前台同步够用。
+	  `aps-environment` 为 CloudKit 通知做好 entitlement 准备，但当前尚未真机执行或验证。
+	  当前也没有声明 `UIBackgroundModes`。这个文件及其注释都不能证明前台或后台投递；
+	  真机清单只记录实际观察结果，产品不承诺任何到达时延。
 	-->
 	<key>aps-environment</key>
 	<string>development</string>
