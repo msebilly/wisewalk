@@ -93,7 +93,11 @@ enum LedgerSyncStatus: Equatable, Sendable {
     var displayDiagnosticDetail: String? {
         guard let diagnosticDetail else { return nil }
         var normalized = diagnosticDetail
-        for forbidden in ["已备份", "已同步", "同步完成", "待上传", "上次同步", "安全", "刚刚"] {
+        for forbidden in [
+            "已备份", "已同步", "同步完成", "备份完成", "刚刚",
+            "待上传", "上次同步", "已上传", "安全", "已保存到 iCloud",
+            "同步已开启", "备份已开启"
+        ] {
             normalized = normalized.replacingOccurrences(of: forbidden, with: "状态词已隐藏")
         }
         normalized = normalized
