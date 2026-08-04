@@ -41,7 +41,7 @@ enum LedgerSyncStatus: Equatable, Sendable {
     case temporarilyUnavailable
     case accountLookupFailed(reason: String)
 
-    /// 记录只在这台设备上。
+    /// 当前 App 使用本地账本路径；不推断此前是否已有远端副本。
     /// - Parameter reason: 降级的原因；`nil` 表示本来就没要求同步（不是出错）。
     case localOnly(reason: String?)
 
@@ -63,19 +63,19 @@ enum LedgerSyncStatus: Equatable, Sendable {
         case .available:
             "iCloud 账户可用"
         case .noAccount:
-            "记录目前只在这台设备上 · 未登录 iCloud"
+            "这台设备目前无法使用 iCloud · 未登录 iCloud"
         case .restricted:
-            "记录目前只在这台设备上 · iCloud 账户受限"
+            "这台设备目前无法使用 iCloud · iCloud 账户受限"
         case .couldNotDetermine:
-            "记录目前只在这台设备上 · 无法确定 iCloud 账户状态"
+            "这台设备目前无法使用 iCloud · 无法确定 iCloud 账户状态"
         case .temporarilyUnavailable:
-            "记录目前只在这台设备上 · iCloud 暂时不可用"
+            "这台设备目前无法使用 iCloud · iCloud 暂时不可用"
         case .accountLookupFailed:
-            "记录目前只在这台设备上 · 无法查询 iCloud 账户"
+            "这台设备目前无法使用 iCloud · 无法查询 iCloud 账户"
         case .localOnly(.some):
-            "记录目前只在这台设备上 · iCloud 数据库未能打开"
+            "当前使用本地账本 · iCloud 数据库未能打开"
         case .localOnly(nil):
-            "记录目前只在这台设备上 · 未启用 iCloud"
+            "当前使用本地账本 · 未启用 iCloud"
         }
     }
 
@@ -96,7 +96,9 @@ enum LedgerSyncStatus: Equatable, Sendable {
         for forbidden in [
             "已备份", "已同步", "同步完成", "备份完成", "刚刚",
             "待上传", "上次同步", "已上传", "安全", "已保存到 iCloud",
-            "同步已开启", "备份已开启"
+            "同步已开启", "备份已开启",
+            "只在这台设备", "只有这台设备", "仅在本机", "纯本地",
+            "只留本机", "没有远端", "无远端", "iCloud 上没有", "未上传到 iCloud"
         ] {
             normalized = normalized.replacingOccurrences(of: forbidden, with: "状态词已隐藏")
         }

@@ -57,13 +57,14 @@ Console 编辑 SwiftData 私有 schema、删改记录或人为重排到达顺序
 | 项目 | 实测值 |
 |---|---|
 | 测试 iCloud 账户代号（不要写真实邮箱） | [ ] |
-| 旧本地构建完整 SHA | [ ] |
+| predecessor 本地构建完整 SHA（必须为 `817f930820fd817a3da5179354af0b8bc135e047`） | [ ] |
 | CloudKit 构建完整 SHA | [ ] |
 | Bundle ID / development container | [ ] |
 | A：标签 / 机型 / OS / 时区 / 设备短码 | [ ] |
 | B：标签 / 机型 / OS / 时区 / 设备短码 | [ ] |
-| 归档时间 / 安装时间 | [ ] |
-| 已核验的 signed-entitlements 输出路径 | [ ] |
+| predecessor / CloudKit 归档时间与安装时间 | [ ] |
+| predecessor / CloudKit 已核验的 signed-entitlements 输出路径 | [ ] |
+| RD-05 A/B `.xcappdata` 复制时间 / SHA-256 清单路径 | [ ] |
 
 每个独立重跑使用新的固定后缀（如 `-R2`），并把实际完整标签记入证据；不能复用旧标签
 后把旧记录误认成本轮传输。
@@ -98,7 +99,72 @@ Console 编辑 SwiftData 私有 schema、删改记录或人为重排到达顺序
 
 ### RD-01 — 既有本地 store 原地升级（解除 `v3-migrate-safety`）
 
-1. A 安装当前 local-only 构建。确认 build SHA 后，使用 UI 建立三个固定标签：
+**唯一合格的 predecessor 是完整 SHA
+`817f930820fd817a3da5179354af0b8bc135e047`。** 该提交是本分支起点
+`origin/main`：`ModelContainerFactory.onDisk()` 的默认值仍为 `.thisDeviceOnly`，
+生产入口直接调用该默认值；`project.yml` 没有 `CODE_SIGN_ENTITLEMENTS`，仓库树也没有
+`WiseWalk.entitlements`。不得拿当前源码关掉 UI 文案或改参数冒充旧构建；当前生产入口总是
+请求 `.iCloud`，而当前签名配置一旦启用就会携带 CloudKit 配置。
+
+先在**独立的临时 worktree** 生成可追溯 predecessor artifact；不得切换或改动当前验收
+worktree，也不得把临时签名设置提交：
+
+```bash
+PREDECESSOR_SHA=817f930820fd817a3da5179354af0b8bc135e047
+OLD_WT="$HOME/wisewalk-rd01-predecessor"
+EVIDENCE="$HOME/wisewalk-rd-evidence/RD-01"
+TEAM_ID="<与当前 CloudKit build 完全相同的 development team ID>"
+
+git worktree add --detach "$OLD_WT" "$PREDECESSOR_SHA"
+mkdir -p "$EVIDENCE"
+cd "$OLD_WT"
+test "$(git rev-parse HEAD)" = "$PREDECESSOR_SHA"
+git rev-parse HEAD | tee "$EVIDENCE/predecessor-git-sha.txt"
+xcodegen generate --quiet
+
+# 仅用命令行覆盖临时打开 development signing；不要设置
+# WISEWALK_VERIFIED_CLOUDKIT_DEVICE，也不要添加 iCloud capability。
+xcodebuild archive \
+  -project WiseWalk.xcodeproj -scheme WiseWalk -configuration Debug \
+  -destination 'generic/platform=iOS' \
+  -archivePath "$EVIDENCE/WiseWalk-local-only.xcarchive" \
+  DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic \
+  CODE_SIGNING_ALLOWED=YES CODE_SIGN_ENTITLEMENTS= \
+  -allowProvisioningUpdates
+```
+
+如团队政策不允许 `-allowProvisioningUpdates`，预先安装允许**同一 Team + 同一 App ID**
+的 development profile 后去掉该参数；不能换 bundle ID、Team 或 App 身份绕过。
+不得设置 `WISEWALK_VERIFIED_CLOUDKIT_DEVICE`。归档后检查**实际签名产物**，不能只看源码：
+
+```bash
+APP="$EVIDENCE/WiseWalk-local-only.xcarchive/Products/Applications/WiseWalk.app"
+codesign --verify --deep --strict "$APP"
+codesign -d --entitlements :- "$APP" 2>&1 \
+  | tee "$EVIDENCE/predecessor-signed-entitlements.txt"
+grep -F "com.msebilly.wisewalk" "$EVIDENCE/predecessor-signed-entitlements.txt"
+if grep -Eqi 'com\.apple\.developer\.(icloud|ubiquity)' \
+     "$EVIDENCE/predecessor-signed-entitlements.txt"; then
+  echo "BLOCKED: predecessor 签名带有 iCloud/ubiquity capability" >&2
+  exit 1
+fi
+shasum -a 256 "$APP/WiseWalk" \
+  | tee "$EVIDENCE/predecessor-executable.sha256"
+date -u '+%Y-%m-%dT%H:%M:%SZ' \
+  | tee "$EVIDENCE/predecessor-archive-time.txt"
+```
+
+signed-entitlements 证据必须能确认 application identifier 对应
+`com.msebilly.wisewalk` 和同一 Team，同时**不存在**
+`com.apple.developer.icloud-container-identifiers`、
+`com.apple.developer.icloud-services` 及任何 ubiquity/iCloud capability。完整 40 位 SHA、
+archive 时间、产物 hash 和 entitlement 输出路径都填入证据表。若这个精确提交不能以同一
+App 身份 build、provision 或安装，**RD-01 = BLOCKED，发布仍被阻断**；不得换提交、
+bundle ID、Team，也不得叫用户改 store 或迁移 store。
+
+完成 artifact 核验后：
+
+1. A 安装上述 predecessor。再次核对实际安装的 build SHA 后，使用 UI 建立三个固定标签：
    `RD01-声-500-37`（目标 37）、`RD01-坐-31m`（目标 31 分钟）、
    `RD01-勾-1`（目标 1 次）。打开今日页形成当天 snapshot。
 2. 在 `RD01-声-500-37` 用计数器完成 **+37**，再从补记 UI 手动记 **+500**，
@@ -107,8 +173,9 @@ Console 编辑 SwiftData 私有 schema、删改记录或人为重排到达顺序
 3. 从 UI 为 `RD01-坐-31m` 记 **31 分钟**，为 `RD01-勾-1` 完成 **1 次**。
    截取每条流水的量、来源、日期、设备名、撤销关系，以及当日三项集合和目标；
    不能只记三个 entity count。
-4. **不卸载、不重装、不清数据**，保持相同 bundle ID，在 A 上覆盖安装已签名
-   CloudKit build；这才是同一 store 的 in-place upgrade。
+4. **不卸载 App、不删除 App 数据、不清数据**，保持同一 bundle ID 与 Team，在 A 上用
+   Xcode Devices and Simulators 覆盖安装本轮已核验签名的 CloudKit build；这才是同一
+   store 的 in-place upgrade。整个 case 不得手工读写、复制回填或迁移测试 store。
 5. 首次启动后立即复核：三项、目标、snapshot、逐笔流水与有效总数必须与步骤 2–3
    完全相同。到观察窗口收敛后再复核一次，仍须完全相同。
 6. B 首次安装同一完整 SHA 的 CloudKit build。等待本 case 的收敛条件：
@@ -145,7 +212,7 @@ Console 编辑 SwiftData 私有 schema、删改记录或人为重排到达顺序
 
 App/SwiftData 没有受支持的接口强制 CloudKit 记录顺序。每个子项最多做五次独立
 fresh-device B 运行：先保存前一轮证据，再清 B 的本地 App 数据并重新安装同一 SHA，
-开启屏幕录制，启动后连续记录 UI 与可用的诊断/导出实体计数。CloudKit Console
+开启屏幕录制，启动后连续记录 UI 与当时确实可取得的系统日志/实体计数证据。CloudKit Console
 最多只读观察，绝不编辑私有 SwiftData schema 或记录来制造顺序。
 
 若没有证据证明指定中间态真实发生，子项就是 **BLOCKED / UNVERIFIED**：
@@ -176,14 +243,110 @@ fresh-device B 运行：先保存前一轮证据，再清 B 的本地 App 数据
 分别做 `RD05-AFIRST`、`RD05-BFIRST`、`RD05-SAME`：
 
 1. 先让 A/B 都看到同一原始 **+500** 与一笔对照 **+300**，总数 800。
+   共享项使用本子运行的固定标签（`RD05-AFIRST` / `RD05-BFIRST` / `RD05-SAME`），
+   以便 raw 查询精确定位，不与其他 fixture 混淆。
 2. 两边离线，各自从 UI 撤销同一笔原始 +500；再按三种顺序重连。
 3. 所有中间态都不得出现负数或双扣；收敛后 A/B 有效总数均精确为 **300**。
    原始 +500 行仍存在，+300 不变，读侧只呈现一次该撤销效果。
-4. 保存 append-only 证据。若两条物理 adjustment 被读侧去重，诊断/导出要如实记录
-   能确认的物理条数、共同 `revoke:<原记录 id>` 与不同 UUID；若工具未暴露物理层，
-   写明“物理条数未知”，不得声称重复记录已被删除。
+4. **PASS 必须有两台设备各自的 raw read-only 证据；UI 去重后的 300 不够。** 收敛并
+   终止 A/B 的 App 后，在 Xcode **Window → Devices and Simulators → Devices →
+   Installed Apps** 分别选中 WiseWalk，使用 **Download Container…** 下载 A、B 的
+   `.xcappdata`。保留原下载件，再复制到例如
+   `$HOME/wisewalk-rd-evidence/RD-05/<AFIRST|BFIRST|SAME>/<A|B>/`。记录下载/复制 UTC
+   时间，并对每个 `.xcappdata` 内 `AppData/Library/Application Support/WiseWalk.store`
+   及并存的 `-wal` / `-shm` 做 `shasum -a 256`；hash 清单与复制时间必须写入证据表。
+   查询前将证据副本设为只读，查询后重新计算 hash，必须完全相同。不得查询仍在设备内
+   的 live store，也不得把证据副本写回设备。
 
-双扣、负数、原记录消失或任一设备不是 300：**FAIL**。
+```bash
+COPY="<证据目录>/<A 或 B>/WiseWalk.xcappdata"
+date -u '+%Y-%m-%dT%H:%M:%SZ' > "$COPY.copy-time.txt"
+find "$COPY" -type f -exec shasum -a 256 {} \; | sort > "$COPY.before.sha256"
+chmod -R a-w "$COPY"
+# 完成下方 sqlite3 -readonly 查询后：
+find "$COPY" -type f -exec shasum -a 256 {} \; | sort > "$COPY.after.sha256"
+diff -u "$COPY.before.sha256" "$COPY.after.sha256"
+```
+
+5. 对 A、B 的**副本**各执行一次以下只读检查。先用
+   `PRAGMA table_info('ZPRACTICESESSION')` 确认本 build 的列可可靠识别为
+   `ZID`、`ZAMOUNT`、`ZNOTE`、`ZSOURCERAW`、`ZITEM`，并确认
+   `ZPRACTICEITEM` 的 `Z_PK` / `ZNAME`；任一列不能可靠识别就 **RD-05 = BLOCKED**，
+   不得猜列名。先用固定标签取得原始 +500 的完整 UUID；查询必须只返回一行：
+
+```bash
+STORE="<A 或 B 的 .xcappdata>/AppData/Library/Application Support/WiseWalk.store"
+ITEM_LABEL="RD05-AFIRST" # 另两轮改为对应固定标签
+
+sqlite3 -readonly -header -column "$STORE" "
+  PRAGMA query_only=ON;
+  PRAGMA table_info('ZPRACTICESESSION');
+  PRAGMA table_info('ZPRACTICEITEM');
+  SELECT lower(
+           substr(hex(s.ZID),1,8) || '-' || substr(hex(s.ZID),9,4) || '-' ||
+           substr(hex(s.ZID),13,4) || '-' || substr(hex(s.ZID),17,4) || '-' ||
+           substr(hex(s.ZID),21,12)
+         ) AS original_uuid,
+         s.ZAMOUNT, s.ZSOURCERAW, s.ZITEM
+  FROM ZPRACTICESESSION AS s
+  JOIN ZPRACTICEITEM AS i ON i.Z_PK=s.ZITEM
+  WHERE i.ZNAME='$ITEM_LABEL'
+    AND s.ZAMOUNT=500 AND s.ZSOURCERAW<>'adjustment';
+"
+
+ORIGINAL_UUID="<原始 +500 的完整 UUID>"
+NOTE="revoke:$ORIGINAL_UUID"
+
+sqlite3 -readonly -header -column "$STORE" \
+  "PRAGMA query_only=ON; SELECT '$NOTE' AS exact_note;"
+
+# 必须输出 adjustment_rows=2、distinct_ids=2、exact_minus_500=2。
+sqlite3 -readonly -header -column "$STORE" "
+  PRAGMA query_only=ON;
+  SELECT count(*) AS adjustment_rows,
+         count(DISTINCT hex(ZID)) AS distinct_ids,
+         sum(CASE WHEN ZAMOUNT=-500 THEN 1 ELSE 0 END) AS exact_minus_500
+  FROM ZPRACTICESESSION
+  WHERE ZSOURCERAW='adjustment' AND ZNOTE='$NOTE';
+"
+
+# 原 +500 与对照 +300 必须仍是同一 item 的各一条物理行；
+# 完整 note 后缀必须就是原 +500 的 ZID。必须输出 original_500=1、control_300=1。
+sqlite3 -readonly -header -column "$STORE" "
+  PRAGMA query_only=ON;
+  SELECT sum(CASE
+               WHEN upper(hex(ZID))=upper(replace('$ORIGINAL_UUID','-',''))
+                    AND ZAMOUNT=500 THEN 1 ELSE 0
+             END) AS original_500,
+         sum(CASE
+               WHEN ZAMOUNT=300 AND ZSOURCERAW<>'adjustment' THEN 1 ELSE 0
+             END) AS control_300
+  FROM ZPRACTICESESSION
+  WHERE ZITEM=(
+    SELECT ZITEM FROM ZPRACTICESESSION
+    WHERE upper(hex(ZID))=upper(replace('$ORIGINAL_UUID','-',''))
+  );
+"
+
+# 保留逐行证据；两条 adjustment 的 hex(ZID) 必须不同，完整 note 必须逐字相同。
+sqlite3 -readonly -header -column "$STORE" "
+  PRAGMA query_only=ON;
+  SELECT hex(ZID) AS id, ZAMOUNT, ZSOURCERAW, ZNOTE, ZITEM
+  FROM ZPRACTICESESSION
+  WHERE (ZSOURCERAW='adjustment' AND ZNOTE='$NOTE')
+     OR upper(hex(ZID))=upper(replace('$ORIGINAL_UUID','-',''))
+  ORDER BY ZAMOUNT DESC, id;
+"
+```
+
+每份设备副本都必须证明：完整 `revoke:<original UUID>` 对应**恰好两条** `-500`
+adjustment、两个不同 `ZID`、原 +500 仍存在；同时保留 UI 中未变的 +300 行和有效总数
+**300** 的截图。raw rows 与 UI 合起来才证明“物理两条、读侧只生效一次”。
+
+双扣、负数、原记录消失、raw 结果不满足上述不变量或任一设备不是 300：**FAIL**。
+无法下载 container、无法取得/保全 raw 副本、列无法可靠识别、hash 前后变化或任一设备
+缺 raw 证据：**BLOCKED，绝不 PASS**。不得编辑 SQLite 或 CloudKit private schema；
+当前 App 没有诊断/export UI，不得声称它提供了物理行证据。RD-05 BLOCKED 继续阻止默认启用。
 
 ### RD-06 — 已观察到的半状态下终止与恢复
 
@@ -201,11 +364,14 @@ fresh-device B 运行：先保存前一轮证据，再清 B 的本地 App 数据
 
 1. 用专用账户在 A 建 `RD07-ACCOUNT-A` 流水，并先在 B 逐笔确认真实传输。
 2. 在 B 退出 iCloud；等待 `.CKAccountChanged` 后，底栏必须刷新为对应的
-   “记录目前只在这台设备上”不可用事实，不能仍显示账户可用。
+   `这台设备目前无法使用 iCloud · <具体原因>`，不能仍显示账户可用。此时必须明确记录：
+   原账户 private database 中此前的副本是否仍存在是 **UNKNOWN**；账户状态不是 locality
+   证明，不能据此写“仅本机”或“远端已删除”。
 3. 若有第二个可丢弃账户，先清 B 本地 App 数据再切换，确认全新安装看不到
    `RD07-ACCOUNT-A`；在第二账户创建 `RD07-ACCOUNT-B`，原账户的 A 也不得收到它。
 4. B 返回原专用账户并重新安装/启动：先单独记录账户状态恢复，再等待
-   `RD07-ACCOUNT-A` 逐笔回来；“账户可用”本身不算数据恢复。
+   `RD07-ACCOUNT-A` 逐笔回来；只有重新观察到逐笔数据后才能记录远端副本事实，
+   “账户可用”本身不算数据恢复。
 
 iOS/MDM 阻止退出或切换、没有第二个可丢弃账户，受影响子项记 **BLOCKED**。
 发现跨账户数据集静默出现为 **FAIL**。
