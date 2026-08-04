@@ -24,7 +24,8 @@ setup_code="${PIPESTATUS[0]}"
 [ "$setup_code" = "0" ] || fail "用真实界面记录 1 声失败"
 
 # SQLite 只能在 App 终止时改；否则 Core Data 的内存状态可能把 seed 覆盖回去。
-xcrun simctl terminate "$UDID" "$APP" >/dev/null 2>&1
+xcrun simctl terminate "$UDID" "$APP" >/dev/null 2>&1 \
+  || fail "终止 App 失败，不能在未终止状态下改 SQLite"
 sleep 1
 ww_paths
 [ -f "$MAIN" ] || fail "找不到主库 $MAIN"

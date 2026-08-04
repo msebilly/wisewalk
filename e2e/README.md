@@ -81,6 +81,15 @@ App 终止后，driver 在 `WiseWalk.store` 中精确找到这一笔；原 `ZDEV
 「计数器」和远端设备名。最后再查库：仍须正好 1 笔、合计 1 声、1 个业务 ID，
 且原主键的数量、来源、设备名都没变。
 
+实测证据（都只是在本地 SQLite / UI 接线，不是 CloudKit）：
+
+| 跑法 | 结果 |
+|---|---|
+| baseline real implementation | GREEN，exit 0 |
+| 去掉 `EntryRow.metaText` | RED，exit 1，缺少 `iPad·X7QP` |
+| 恢复实现 / 重新安装 | GREEN，exit 0 |
+| 强制 no-op 预条件（原设备名分支） | RED（已观察到；未重新复现 exit code） |
+
 这证明两件事：`deviceName` 能从持久化记录读回来；补记/修正列表确实把它接到
 `EntryRow.metaText` 并画在对应流水上。它**不证明** CloudKit schema、订阅、合并、
 网络传输或两台真设备之间的同步；这里没有运行真实 CloudKit，只是趁 App 终止时
