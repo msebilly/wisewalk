@@ -94,6 +94,7 @@ struct CloudAccountStatusTests {
         await monitor.refresh()
 
         #expect(monitor.status == .accountLookupFailed(reason: "无法连接账户服务"))
+        #expect(monitor.status.barText == "这台设备目前无法使用 iCloud · 无法查询 iCloud 账户")
     }
 
     @MainActor
@@ -120,6 +121,7 @@ struct CloudAccountStatusTests {
         }
 
         #expect(monitor.status == .noAccount)
+        #expect(monitor.status.barText == "这台设备目前无法使用 iCloud · 未登录 iCloud")
     }
 
     @Test func unsignedOrUnverifiedBuildFailsWithoutCreatingACloudKitContainer() async {

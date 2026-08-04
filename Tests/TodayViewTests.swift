@@ -29,6 +29,29 @@ import Foundation
                   syncStatus: env.syncStatus)
 }
 
+struct TodaySyncStatusTests {
+    @MainActor
+    @Test func 底部状态栏与读屏只陈述账户不可用或当前本地路径() {
+        let 每一档: [(LedgerSyncStatus, String)] = [
+            (.noAccount, "这台设备目前无法使用 iCloud · 未登录 iCloud"),
+            (.restricted, "这台设备目前无法使用 iCloud · iCloud 账户受限"),
+            (.couldNotDetermine, "这台设备目前无法使用 iCloud · 无法确定 iCloud 账户状态"),
+            (.temporarilyUnavailable, "这台设备目前无法使用 iCloud · iCloud 暂时不可用"),
+            (.accountLookupFailed(reason: "账户服务超时"),
+             "这台设备目前无法使用 iCloud · 无法查询 iCloud 账户"),
+            (.localOnly(reason: "数据库打不开"),
+             "当前使用本地账本 · iCloud 数据库未能打开"),
+            (.localOnly(reason: nil), "当前使用本地账本 · 未启用 iCloud")
+        ]
+
+        for (状态, 事实) in 每一档 {
+            _ = BackupStatusBar(status: 状态)
+            #expect(状态.barText == 事实,
+                    "BackupStatusBar 的可见文字与 accessibilityLabel 都从 barText 读取")
+        }
+    }
+}
+
 @MainActor
 @Test func 无定课时是空态不是圆满() throws {
     // 一项功课都没立就说「今日圆满」，是对用户的欺骗。

@@ -169,7 +169,7 @@ struct 同步状态Tests {
     }
 
     @MainActor
-    @Test func 降级之后算只在本机并且带着理由() throws {
+    @Test func 降级之后标记当前使用本地账本并且带着理由() throws {
         let c = try ModelContainerFactory.inMemory()
         let 降 = LedgerSyncStatus(LedgerOpen(container: c, sync: .thisDeviceOnly,
                                              fallbackReason: "容器 ID 对不上"))
@@ -182,23 +182,23 @@ struct 同步状态Tests {
         let 本机 = LedgerSyncStatus(LedgerOpen(container: c, sync: .thisDeviceOnly,
                                               fallbackReason: nil))
         #expect(本机 == .localOnly(reason: nil))
-        #expect(本机.barText == "记录目前只在这台设备上 · 未启用 iCloud")
+        #expect(本机.barText == "当前使用本地账本 · 未启用 iCloud")
     }
 
     @Test func 状态栏每一档都只说对应的事实() {
         let 每一档: [(LedgerSyncStatus, String)] = [
             (.checking, "正在检查 iCloud 可用性"),
             (.available, "iCloud 账户可用"),
-            (.noAccount, "记录目前只在这台设备上 · 未登录 iCloud"),
-            (.restricted, "记录目前只在这台设备上 · iCloud 账户受限"),
-            (.couldNotDetermine, "记录目前只在这台设备上 · 无法确定 iCloud 账户状态"),
-            (.temporarilyUnavailable, "记录目前只在这台设备上 · iCloud 暂时不可用"),
+            (.noAccount, "这台设备目前无法使用 iCloud · 未登录 iCloud"),
+            (.restricted, "这台设备目前无法使用 iCloud · iCloud 账户受限"),
+            (.couldNotDetermine, "这台设备目前无法使用 iCloud · 无法确定 iCloud 账户状态"),
+            (.temporarilyUnavailable, "这台设备目前无法使用 iCloud · iCloud 暂时不可用"),
             (.accountLookupFailed(reason: "无法连接账户服务"),
-             "记录目前只在这台设备上 · 无法查询 iCloud 账户"),
+             "这台设备目前无法使用 iCloud · 无法查询 iCloud 账户"),
             (.localOnly(reason: "容器 ID 对不上"),
-             "记录目前只在这台设备上 · iCloud 数据库未能打开"),
+             "当前使用本地账本 · iCloud 数据库未能打开"),
             (.localOnly(reason: nil),
-             "记录目前只在这台设备上 · 未启用 iCloud")
+             "当前使用本地账本 · 未启用 iCloud")
         ]
 
         for (状态, 事实) in 每一档 {
@@ -213,7 +213,8 @@ struct 同步状态Tests {
 
         #expect(详情.contains("容器 ID 对不上"))
         #expect(详情.count <= 80, "技术原因没有边界：\(详情)")
-        #expect(状态.barText.contains("只在这台设备上"), "降级原因不能变成成功状态")
+        #expect(状态.barText == "当前使用本地账本 · iCloud 数据库未能打开",
+                "降级状态必须只陈述当前 App 路径")
     }
 
     @Test func 降级和账户查询的具体原因会原样暴露给诊断行() {
@@ -236,6 +237,31 @@ struct 同步状态Tests {
             let 屏幕详情 = try! #require(状态.displayDiagnosticDetail)
             #expect(!屏幕详情.contains(词), "技术原因把「\(词)」带上了屏幕：\(屏幕详情)")
             #expect(状态.diagnosticDetail?.contains(词) == true, "原始诊断原因被改写或丢失")
+        }
+    }
+
+    /// `CKAccountStatus` 只说明这台设备当前能否使用账户，无法证明此前是否上传过记录。
+    /// 降级状态也只说明当前 App 路径，不能据此断言用户的私有数据库没有副本。
+    @Test func 每个账户不可用或降级文案都不许断言远端副本不存在() {
+        let 不许出现 = [
+            "只在这台设备", "只有这台设备", "仅在本机", "纯本地",
+            "只留本机", "没有远端", "无远端", "iCloud 上没有", "未上传到 iCloud"
+        ]
+        let 每一档: [LedgerSyncStatus] = [
+            .noAccount, .restricted, .couldNotDetermine, .temporarilyUnavailable,
+            .accountLookupFailed(reason: "底层误报：记录仅在本机"),
+            .localOnly(reason: nil),
+            .localOnly(reason: "底层误报：记录只有这台设备有")
+        ]
+
+        for 状态 in 每一档 {
+            let 底栏与读屏文案 = [状态.barText, 状态.displayDiagnosticDetail]
+                .compactMap { $0 }
+                .joined(separator: "。")
+            for 说法 in 不许出现 {
+                #expect(!底栏与读屏文案.contains(说法),
+                        "\(状态) 用账户或当前路径断言了远端副本不存在：\(底栏与读屏文案)")
+            }
         }
     }
 
