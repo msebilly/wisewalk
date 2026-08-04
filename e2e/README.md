@@ -73,17 +73,20 @@ make install-sim              # 编译并装进当前开着的模拟器
 ## 10 的边界：证明 UI 接线，不冒充 CloudKit
 
 `10-remote-device.sh` 先清状态、立一门计数课，再从真实计数器记 **1 声**。
-App 终止后，driver 在 `WiseWalk.store` 中精确找到这一笔，只把它的
-`ZDEVICENAME` 改为一个不可能误认的远端名字；必须正好更新 1 行。重启后进入
-「补记」，断言同一条 metadata 同时含「计数器」和远端设备名。最后再查库：
-仍须正好 1 笔、合计 1 声、1 个业务 ID，且原主键的数量、来源、设备名都没变。
+seed 前先在「补记」页看到 `+1 声`，并证明远端 marker 还不可见，再退回「今日」。
+App 终止后，driver 在 `WiseWalk.store` 中精确找到这一笔；原 `ZDEVICENAME`
+必须是非空的本机身份、且明确不等于远端 marker，否则拒绝更新，不能拿 SQLite
+把同值赋回也算 `changes() = 1` 的行为假绿。随后只把这一笔的设备名改成 marker，
+且必须正好更新 1 行。重启后进入同一个「补记」页，断言同一条 metadata 同时含
+「计数器」和远端设备名。最后再查库：仍须正好 1 笔、合计 1 声、1 个业务 ID，
+且原主键的数量、来源、设备名都没变。
 
 这证明两件事：`deviceName` 能从持久化记录读回来；补记/修正列表确实把它接到
 `EntryRow.metaText` 并画在对应流水上。它**不证明** CloudKit schema、订阅、合并、
 网络传输或两台真设备之间的同步；这里没有运行真实 CloudKit，只是趁 App 终止时
-seed 模拟器 SQLite。三段证据是：初始真实实现 GREEN exit 0；变异把该行退成只有
-时间/来源后，flow 在缺少 `iPad·X7QP` 处 RED exit 1；恢复并重新安装当前渲染后
-再 GREEN exit 0。
+seed 模拟器 SQLite。变异若让本机流水预先带 marker，driver 必须在 no-op 前置条件
+处 RED；渲染若退成只有时间/来源，flow 必须在缺少 `iPad·X7QP` 处 RED；恢复后才可
+GREEN。
 
 ## ⚠️ 造草稿要把 `startedAt` 错开
 

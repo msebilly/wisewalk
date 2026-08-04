@@ -37,24 +37,39 @@ session_count="$(sqlite3 "$MAIN" "select count(*) from ZPRACTICESESSION;")" \
   || fail "读流水失败"
 [ "$session_count" = "1" ] || fail "要正好 1 笔流水，实际 ${session_count}"
 
-row="$(sqlite3 -separator '|' "$MAIN" \
-  "select Z_PK,ZAMOUNT,ZSOURCERAW,hex(ZID) from ZPRACTICESESSION;")" \
+row="$(sqlite3 -separator '|' -nullvalue '__SQL_NULL__' "$MAIN" "
+  select Z_PK,ZAMOUNT,hex(ZSOURCERAW),hex(ZID),
+         case when ZDEVICENAME is null then '__SQL_NULL__'
+              else 'HEX:' || hex(ZDEVICENAME) end
+  from ZPRACTICESESSION;
+  ")" \
   || fail "读流水字段失败"
-IFS='|' read -r session_pk amount source session_id <<EOF
+IFS='|' read -r session_pk amount source_hex session_id original_device_token <<EOF
 $row
 EOF
 [ -n "$session_pk" ] || fail "流水没有主键"
 [ "$amount" = "1" ] || fail "真实界面记下的量不是 1，而是 ${amount}"
-[ "$source" = "counter" ] || fail "真实界面记下的来源不是 counter，而是 ${source}"
+[ "$source_hex" = "636F756E746572" ] \
+  || fail "真实界面记下的来源不是 counter，而是 hex:${source_hex}"
 [ -n "$session_id" ] || fail "流水没有业务 ID"
+case "$original_device_token" in
+  __SQL_NULL__) fail "真实界面流水没有本机设备身份（NULL）" ;;
+  HEX:) fail "真实界面流水没有本机设备身份（空字符串）" ;;
+  HEX:?*) original_device_hex="${original_device_token#HEX:}" ;;
+  *) fail "本机设备身份编码无效：${original_device_token}" ;;
+esac
+remote_device_hex="69506164C2B758375150"
+[ "$original_device_hex" != "$remote_device_hex" ] \
+  || fail "真实界面流水已经是 iPad·X7QP，seed 会成为 no-op"
 
 # 精确钉住刚才那一笔：主键、数量、来源都得仍与 setup 所见一致，才允许改设备名。
-# marker 只在 seed 和最终断言里出现，不会借 setup 的可见文案让断言假绿。
+# 原设备身份也进入 WHERE；setup 已在同一补记页证明 marker 当时不可见。
 changed="$(sqlite3 "$MAIN" "
 BEGIN IMMEDIATE;
 UPDATE ZPRACTICESESSION
 SET ZDEVICENAME='iPad·X7QP'
-WHERE Z_PK=${session_pk} AND ZAMOUNT=1 AND ZSOURCERAW='counter';
+WHERE Z_PK=${session_pk} AND ZAMOUNT=1 AND ZSOURCERAW='counter'
+      AND hex(ZDEVICENAME)='${original_device_hex}';
 SELECT changes();
 COMMIT;
 ")" || fail "写入远端设备名失败"
