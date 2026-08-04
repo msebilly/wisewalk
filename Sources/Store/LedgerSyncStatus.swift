@@ -78,6 +78,32 @@ enum LedgerSyncStatus: Equatable, Sendable {
             "记录目前只在这台设备上 · 未启用 iCloud"
         }
     }
+
+    /// Raw technical context retained for diagnostics and export.
+    var diagnosticDetail: String? {
+        switch self {
+        case .accountLookupFailed(let value), .localOnly(.some(let value)):
+            value
+        default:
+            nil
+        }
+    }
+
+    /// Bounded and sanitized technical context for the existing status bar.
+    var displayDiagnosticDetail: String? {
+        guard let diagnosticDetail else { return nil }
+        var normalized = diagnosticDetail
+        for forbidden in ["已备份", "已同步", "同步完成", "待上传", "上次同步", "安全", "刚刚"] {
+            normalized = normalized.replacingOccurrences(of: forbidden, with: "状态词已隐藏")
+        }
+        normalized = normalized
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        guard !normalized.isEmpty else { return nil }
+        guard normalized.count > 80 else { return normalized }
+        return String(normalized.prefix(79)) + "…"
+    }
 }
 
 @MainActor

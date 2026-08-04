@@ -284,8 +284,8 @@ CloudKit 是最终一致的，且**会静默失败**。不给反馈 = 用户以�
 
 `CKContainer.accountStatus()` 已包在可注入的异步边界后；查询抛错是明确的错误档，
 绝不映成可用。监听 `CKAccountChanged` 后会重新查询并更新同一条底栏。
-本仓库 `CODE_SIGNING_ALLOWED: NO`，模拟器缺 entitlement 时调用 `CKContainer`
-会直接 trap，所以模拟器构建先报「无法查询」而不实例化 CloudKit。
+本仓库 `CODE_SIGNING_ALLOWED: NO`，运行时先通过 Security API 检查进程实际应用的
+CloudKit entitlement；模拟器缺 entitlement 时先报「无法查询」而不实例化 CloudKit。
 这些 entitlements 在没有付费账号时从未实际执行；真机、真实账户与跨设备同步仍未验证。
 
 ⚠️ **即使账户可用，也只能证明账户与路径可用。** SwiftData iOS 17
@@ -301,7 +301,9 @@ CloudKit 是最终一致的，且**会静默失败**。不给反馈 = 用户以�
 
 零后端 = 用户报「数据没了」时**无法远程排查**，而这正是核心卖点出问题的时候。
 
-「我的」页提供：CloudKit 账号状态 / 上次成功备份时间 / 待上传条数 / 最近错误码 / 各实体记录数 / **一键导出诊断报告**（不含隐私内容）。
+「我的」页提供：CloudKit 账户与路径状态 / 本地降级原因或最近一次账户查询错误 /
+各实体记录数 / **一键导出诊断报告**（不含隐私内容）。每次同步完成时间和待处理上传
+数量因 SwiftData iOS 17 未提供可靠数据而明确省略，不得推测或展示。
 
 ### 5.5 iCloud 账号变更
 

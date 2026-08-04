@@ -214,9 +214,18 @@ struct BackupStatusBar: View {
     @Environment(\.theme) private var theme
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "iphone")
-            Text(status.barText)
+        VStack(spacing: 2) {
+            HStack(spacing: 6) {
+                Image(systemName: "iphone")
+                Text(status.barText)
+            }
+            if let detail = status.displayDiagnosticDetail {
+                Text(detail)
+                    .font(.caption2)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .multilineTextAlignment(.center)
+            }
         }
         .font(.footnote)
         .foregroundStyle(theme.secondaryText)
@@ -225,6 +234,10 @@ struct BackupStatusBar: View {
         .background(.ultraThinMaterial)
         // 图标是装饰，读屏软件念一遍「iphone」没有意义。
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(status.barText)
+        .accessibilityLabel(
+            [status.barText, status.displayDiagnosticDetail]
+                .compactMap { $0 }
+                .joined(separator: "。")
+        )
     }
 }

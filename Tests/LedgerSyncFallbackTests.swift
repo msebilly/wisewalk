@@ -206,6 +206,37 @@ struct 同步状态Tests {
         }
     }
 
+    @Test func 很长的降级原因会有界地交到现有底栏() {
+        let 冗长原因 = String(repeating: "容器 ID 对不上 ", count: 20)
+        let 状态 = LedgerSyncStatus.localOnly(reason: 冗长原因)
+        let 详情 = try! #require(状态.displayDiagnosticDetail)
+
+        #expect(详情.contains("容器 ID 对不上"))
+        #expect(详情.count <= 80, "技术原因没有边界：\(详情)")
+        #expect(状态.barText.contains("只在这台设备上"), "降级原因不能变成成功状态")
+    }
+
+    @Test func 降级和账户查询的具体原因会原样暴露给诊断行() {
+        let 降级原因 = "CloudKit 容器初始化失败（代码 17）"
+        let 查询原因 = "账户服务超时（代码 9）"
+
+        #expect(LedgerSyncStatus.localOnly(reason: 降级原因).diagnosticDetail == 降级原因)
+        #expect(LedgerSyncStatus.accountLookupFailed(reason: 查询原因).diagnosticDetail == 查询原因)
+        #expect(LedgerSyncStatus.localOnly(reason: nil).diagnosticDetail == nil)
+        #expect(LedgerSyncStatus.available.diagnosticDetail == nil)
+    }
+
+    @Test func 技术原因也不许把禁用词带进现有底栏() {
+        let 禁用词 = ["已备份", "已同步", "同步完成", "待上传", "上次同步", "安全", "刚刚"]
+
+        for 词 in 禁用词 {
+            let 状态 = LedgerSyncStatus.localOnly(reason: "底层报告：\(词)；错误码 17")
+            let 屏幕详情 = try! #require(状态.displayDiagnosticDetail)
+            #expect(!屏幕详情.contains(词), "技术原因把「\(词)」带上了屏幕：\(屏幕详情)")
+            #expect(状态.diagnosticDetail?.contains(词) == true, "原始诊断原因被改写或丢失")
+        }
+    }
+
     /// ⛔⛔ **绝不许承诺「已备份 / 已同步」。**
     ///
     /// SwiftData 在 iOS 17 没暴露 `eventChangedNotification`，

@@ -63,6 +63,19 @@ private actor PendingAccountLookups {
 }
 
 struct CloudAccountStatusTests {
+    @Test func entitlementValueMustContainTheWiseWalkContainer() {
+        #expect(!CloudAccountStatusClient.hasRequiredICloudContainer(in: nil))
+        #expect(!CloudAccountStatusClient.hasRequiredICloudContainer(
+            in: "iCloud.com.msebilly.wisewalk"
+        ))
+        #expect(!CloudAccountStatusClient.hasRequiredICloudContainer(
+            in: ["iCloud.com.example.other"]
+        ))
+        #expect(CloudAccountStatusClient.hasRequiredICloudContainer(
+            in: ["iCloud.com.example.other", "iCloud.com.msebilly.wisewalk"]
+        ))
+    }
+
     @Test func everyCloudKitAccountStatusMapsToAFactualAppState() {
         #expect(CloudAccountAvailability(CKAccountStatus.available) == .available)
         #expect(CloudAccountAvailability(CKAccountStatus.noAccount) == .noAccount)
@@ -115,10 +128,18 @@ struct CloudAccountStatusTests {
         #expect(monitor.status == .noAccount)
     }
 
-    @Test func missingEntitlementFailsBeforeCloudKitContainerCreation() async {
+    @Test(arguments: [
+        CloudKitEntitlementValue.missing,
+        .invalid,
+        .containers([]),
+        .containers(["iCloud.com.example.other"])
+    ])
+    func unprovenEntitlementFailsBeforeCloudKitContainerCreation(
+        _ entitlement: CloudKitEntitlementValue
+    ) async {
         let probe = AccountLookupProbe()
         let client = CloudAccountStatusClient.guarded(
-            hasCloudKitEntitlement: { false },
+            cloudKitEntitlement: { entitlement },
             accountStatus: {
                 await probe.recordCall()
                 return .available
@@ -129,6 +150,22 @@ struct CloudAccountStatusTests {
             _ = try await client.fetch()
         }
         #expect(await probe.calls == 0)
+    }
+
+    @Test func appliedRequiredContainerAllowsCloudKitAccountLookup() async throws {
+        let probe = AccountLookupProbe()
+        let client = CloudAccountStatusClient.guarded(
+            cloudKitEntitlement: {
+                .containers(["iCloud.com.msebilly.wisewalk"])
+            },
+            accountStatus: {
+                await probe.recordCall()
+                return .available
+            }
+        )
+
+        #expect(try await client.fetch() == .available)
+        #expect(await probe.calls == 1)
     }
 
     @MainActor

@@ -1,4 +1,18 @@
 import CloudKit
+import CoreFoundation
+import Security
+
+private typealias SecTaskRef = CFTypeRef
+
+@_silgen_name("SecTaskCreateFromSelf")
+private func SecTaskCreateFromSelf(_ allocator: CFAllocator?) -> Unmanaged<SecTaskRef>?
+
+@_silgen_name("SecTaskCopyValueForEntitlement")
+private func SecTaskCopyValueForEntitlement(
+    _ task: SecTaskRef,
+    _ entitlement: CFString,
+    _ error: UnsafeMutablePointer<Unmanaged<CFError>?>?
+) -> Unmanaged<CFTypeRef>?
 
 enum CloudAccountStatusError: LocalizedError, Equatable, Sendable {
     case missingEntitlement
@@ -30,6 +44,29 @@ enum CloudAccountAvailability: Equatable, Sendable {
     }
 }
 
+enum CloudKitEntitlementValue: Equatable, Sendable {
+    case missing
+    case invalid
+    case containers([String])
+
+    var includesRequiredContainer: Bool {
+        guard case .containers(let identifiers) = self else { return false }
+        return identifiers.contains("iCloud.com.msebilly.wisewalk")
+    }
+
+    init(_ value: Any?) {
+        guard let value else {
+            self = .missing
+            return
+        }
+        guard let identifiers = value as? [String] else {
+            self = .invalid
+            return
+        }
+        self = .containers(identifiers)
+    }
+}
+
 struct CloudAccountStatusClient: Sendable {
     let fetch: @Sendable () async throws -> CloudAccountAvailability
 
@@ -40,7 +77,7 @@ struct CloudAccountStatusClient: Sendable {
     /// The CKContainer path is present for a future signed device build, but these
     /// entitlements have not been exercised without a paid developer account.
     static let live = guarded(
-        hasCloudKitEntitlement: processHasCloudKitEntitlement,
+        cloudKitEntitlement: processCloudKitEntitlement,
         accountStatus: {
             let status = try await CKContainer(
                 identifier: "iCloud.com.msebilly.wisewalk"
@@ -50,26 +87,34 @@ struct CloudAccountStatusClient: Sendable {
     )
 
     static func guarded(
-        hasCloudKitEntitlement: @escaping @Sendable () -> Bool,
+        cloudKitEntitlement: @escaping @Sendable () -> CloudKitEntitlementValue,
         accountStatus: @escaping @Sendable () async throws -> CloudAccountAvailability
     ) -> Self {
         Self {
-            guard hasCloudKitEntitlement() else {
+            guard cloudKitEntitlement().includesRequiredContainer else {
                 throw CloudAccountStatusError.missingEntitlement
             }
             return try await accountStatus()
         }
     }
 
-    private static func processHasCloudKitEntitlement() -> Bool {
-        #if targetEnvironment(simulator)
-        // This repository disables code signing, so simulator builds do not carry
-        // the entitlement and CKContainer traps instead of returning an error.
-        false
-        #else
-        // A device build cannot be installed until the configured entitlements
-        // have been signed by the paid developer account.
-        true
-        #endif
+    static func hasRequiredICloudContainer(in entitlementValue: Any?) -> Bool {
+        CloudKitEntitlementValue(entitlementValue).includesRequiredContainer
+    }
+
+    private static func processCloudKitEntitlement() -> CloudKitEntitlementValue {
+        guard let task = SecTaskCreateFromSelf(nil)?.takeRetainedValue() else {
+            return .missing
+        }
+
+        guard let copied = SecTaskCopyValueForEntitlement(
+            task,
+            "com.apple.developer.icloud-container-identifiers" as CFString,
+            nil
+        ) else {
+            return .missing
+        }
+        let value = copied.takeRetainedValue()
+        return CloudKitEntitlementValue(value)
     }
 }
