@@ -272,23 +272,30 @@ CloudKit 是最终一致的，且**会静默失败**。不给反馈 = 用户以�
 **说不知道的事，比不说更坏**——闭口至少不会让人误以为安全。
 这与 §6.3.1 定案三「不做『静音也响』，半真的承诺比不承诺更坏」是同一条。
 
-**改为只报「路径与账户是否可用」，不报「货到没到」**（`LedgerSyncStatus`）：
+**改为只报账户查询与本地降级的事实，不报「货到没到」**（`LedgerSyncStatus`）：
 
 | 我们确知的事 | 屏幕上 |
 |---|---|
 | 正在查询 iCloud 账户 | 「正在检查 iCloud 可用性」|
-| iCloud 路径打开，且账户可用 | 「iCloud 可用 · 记录将备份到 iCloud」|
+| 已签名真机构建查询到账户可用 | 「iCloud 账户可用」|
 | 未登录 / 账户受限 / 暂时不可用 / 无法确定 / 查询出错 | 明说记录目前只在这台设备上，并附对应的简短事实 |
 | 要求走 iCloud 但数据库开不出来，已退回同一落盘账本 | 「记录目前只在这台设备上 · iCloud 数据库未能打开」|
 | 本来就没要求同步 | 「记录目前只在这台设备上 · 未启用 iCloud」|
 
-`CKContainer.accountStatus()` 已包在可注入的异步边界后；查询抛错是明确的错误档，
-绝不映成可用。监听 `CKAccountChanged` 后会重新查询并更新同一条底栏。
-本仓库 `CODE_SIGNING_ALLOWED: NO`，运行时先通过 Security API 检查进程实际应用的
-CloudKit entitlement；模拟器缺 entitlement 时先报「无法查询」而不实例化 CloudKit。
-这些 entitlements 在没有付费账号时从未实际执行；真机、真实账户与跨设备同步仍未验证。
+公开的 `CKContainer.default().accountStatus()` 已包在可注入的异步边界后；查询抛错会映成
+明确的 `accountLookupFailed`，绝不映成可用。监听 `CKAccountChanged` 后会重新查询并更新
+同一条底栏。iOS 没有受支持的公开 API 能在运行时检查进程实际应用的 entitlement，
+所以本 App 不使用 Security.framework 的私有 entitlement 检查 SPI，也不把 Info.plist
+或源 entitlements 文件当成证明。
+capability 是否应用只能由 provisioning 与代码签名保证。
 
-⚠️ **即使账户可用，也只能证明账户与路径可用。** SwiftData iOS 17
+本仓库 `CODE_SIGNING_ALLOWED: NO`，模拟器也不会应用这份 entitlements；当前构建会先报
+`unsignedOrUnverifiedBuild`，完全不实例化 `CKContainer`。只有已 provisioning、已签名的
+真机构建在构建配置中明确启用 `WISEWALK_VERIFIED_CLOUDKIT_DEVICE` 后，才调用公开账户
+查询；仅仅把目标切到 iphoneos 仍会保守地拒绝查询。这些 entitlements、真实账户与实际
+CloudKit 记录传输在付费开发者账号到位前仍未验证。
+
+⚠️ **即使账户可用，也只能证明 iCloud 账户可用，不能证明数据库传过任何记录。** SwiftData iOS 17
 没有每次同步的完成事件，也没有待上传条数；因此整族禁用词（已备份 / 已同步 /
 同步完成 / 待上传 / 上次同步 / 安全 / 刚刚）在所有状态下都被测试钉死。
 §5.3 的本地 JSON 备份仍是独立于 CloudKit 信号的第二条命。

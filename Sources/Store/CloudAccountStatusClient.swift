@@ -1,26 +1,15 @@
 import CloudKit
-import CoreFoundation
-import Security
-
-private typealias SecTaskRef = CFTypeRef
-
-@_silgen_name("SecTaskCreateFromSelf")
-private func SecTaskCreateFromSelf(_ allocator: CFAllocator?) -> Unmanaged<SecTaskRef>?
-
-@_silgen_name("SecTaskCopyValueForEntitlement")
-private func SecTaskCopyValueForEntitlement(
-    _ task: SecTaskRef,
-    _ entitlement: CFString,
-    _ error: UnsafeMutablePointer<Unmanaged<CFError>?>?
-) -> Unmanaged<CFTypeRef>?
 
 enum CloudAccountStatusError: LocalizedError, Equatable, Sendable {
-    case missingEntitlement
+    case unsignedOrUnverifiedBuild
+    case accountLookupFailed(reason: String)
 
     var errorDescription: String? {
         switch self {
-        case .missingEntitlement:
-            "当前构建没有启用 CloudKit entitlement"
+        case .unsignedOrUnverifiedBuild:
+            "当前构建未签名或无法验证，不查询 iCloud 账户"
+        case .accountLookupFailed(let reason):
+            "iCloud 账户查询失败：\(reason)"
         }
     }
 }
@@ -44,27 +33,9 @@ enum CloudAccountAvailability: Equatable, Sendable {
     }
 }
 
-enum CloudKitEntitlementValue: Equatable, Sendable {
-    case missing
-    case invalid
-    case containers([String])
-
-    var includesRequiredContainer: Bool {
-        guard case .containers(let identifiers) = self else { return false }
-        return identifiers.contains("iCloud.com.msebilly.wisewalk")
-    }
-
-    init(_ value: Any?) {
-        guard let value else {
-            self = .missing
-            return
-        }
-        guard let identifiers = value as? [String] else {
-            self = .invalid
-            return
-        }
-        self = .containers(identifiers)
-    }
+enum CloudAccountBuildVerification: Equatable, Sendable {
+    case unverified
+    case verifiedSignedDevice
 }
 
 struct CloudAccountStatusClient: Sendable {
@@ -74,47 +45,60 @@ struct CloudAccountStatusClient: Sendable {
         self.fetch = fetch
     }
 
-    /// The CKContainer path is present for a future signed device build, but these
-    /// entitlements have not been exercised without a paid developer account.
-    static let live = guarded(
-        cloudKitEntitlement: processCloudKitEntitlement,
+    /// iOS has no public API for inspecting applied entitlements at runtime.
+    /// Simulator builds are therefore blocked before CloudKit is instantiated;
+    /// a provisioned device build must also explicitly enable
+    /// `WISEWALK_VERIFIED_CLOUDKIT_DEVICE` after code signing is configured.
+    static let live = livePolicy(
+        isVerifiedSignedDeviceBuild: liveBuildVerification == .verifiedSignedDevice,
         accountStatus: {
-            let status = try await CKContainer(
-                identifier: "iCloud.com.msebilly.wisewalk"
-            ).accountStatus()
+            let status = try await CKContainer.default().accountStatus()
             return CloudAccountAvailability(status)
         }
     )
 
-    static func guarded(
-        cloudKitEntitlement: @escaping @Sendable () -> CloudKitEntitlementValue,
+    static func livePolicy(
+        isVerifiedSignedDeviceBuild: Bool,
         accountStatus: @escaping @Sendable () async throws -> CloudAccountAvailability
     ) -> Self {
         Self {
-            guard cloudKitEntitlement().includesRequiredContainer else {
-                throw CloudAccountStatusError.missingEntitlement
+            guard isVerifiedSignedDeviceBuild else {
+                throw CloudAccountStatusError.unsignedOrUnverifiedBuild
             }
-            return try await accountStatus()
+            do {
+                return try await accountStatus()
+            } catch {
+                throw CloudAccountStatusError.accountLookupFailed(
+                    reason: error.localizedDescription
+                )
+            }
         }
     }
 
-    static func hasRequiredICloudContainer(in entitlementValue: Any?) -> Bool {
-        CloudKitEntitlementValue(entitlementValue).includesRequiredContainer
+    static func buildVerification(
+        explicitlyVerified: Bool,
+        isSimulator: Bool
+    ) -> CloudAccountBuildVerification {
+        guard explicitlyVerified, !isSimulator else { return .unverified }
+        return .verifiedSignedDevice
     }
 
-    private static func processCloudKitEntitlement() -> CloudKitEntitlementValue {
-        guard let task = SecTaskCreateFromSelf(nil)?.takeRetainedValue() else {
-            return .missing
-        }
+    private static var liveBuildVerification: CloudAccountBuildVerification {
+        #if WISEWALK_VERIFIED_CLOUDKIT_DEVICE
+        let explicitlyVerified = true
+        #else
+        let explicitlyVerified = false
+        #endif
 
-        guard let copied = SecTaskCopyValueForEntitlement(
-            task,
-            "com.apple.developer.icloud-container-identifiers" as CFString,
-            nil
-        ) else {
-            return .missing
-        }
-        let value = copied.takeRetainedValue()
-        return CloudKitEntitlementValue(value)
+        #if targetEnvironment(simulator)
+        let isSimulator = true
+        #else
+        let isSimulator = false
+        #endif
+
+        return buildVerification(
+            explicitlyVerified: explicitlyVerified,
+            isSimulator: isSimulator
+        )
     }
 }

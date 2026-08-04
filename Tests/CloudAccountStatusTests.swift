@@ -63,17 +63,11 @@ private actor PendingAccountLookups {
 }
 
 struct CloudAccountStatusTests {
-    @Test func entitlementValueMustContainTheWiseWalkContainer() {
-        #expect(!CloudAccountStatusClient.hasRequiredICloudContainer(in: nil))
-        #expect(!CloudAccountStatusClient.hasRequiredICloudContainer(
-            in: "iCloud.com.msebilly.wisewalk"
-        ))
-        #expect(!CloudAccountStatusClient.hasRequiredICloudContainer(
-            in: ["iCloud.com.example.other"]
-        ))
-        #expect(CloudAccountStatusClient.hasRequiredICloudContainer(
-            in: ["iCloud.com.example.other", "iCloud.com.msebilly.wisewalk"]
-        ))
+    @Test func deviceTargetWithoutExplicitBuildVerificationRemainsUnverified() {
+        #expect(CloudAccountStatusClient.buildVerification(
+            explicitlyVerified: false,
+            isSimulator: false
+        ) == .unverified)
     }
 
     @Test func everyCloudKitAccountStatusMapsToAFactualAppState() {
@@ -128,36 +122,26 @@ struct CloudAccountStatusTests {
         #expect(monitor.status == .noAccount)
     }
 
-    @Test(arguments: [
-        CloudKitEntitlementValue.missing,
-        .invalid,
-        .containers([]),
-        .containers(["iCloud.com.example.other"])
-    ])
-    func unprovenEntitlementFailsBeforeCloudKitContainerCreation(
-        _ entitlement: CloudKitEntitlementValue
-    ) async {
+    @Test func unsignedOrUnverifiedBuildFailsWithoutCreatingACloudKitContainer() async {
         let probe = AccountLookupProbe()
-        let client = CloudAccountStatusClient.guarded(
-            cloudKitEntitlement: { entitlement },
+        let client = CloudAccountStatusClient.livePolicy(
+            isVerifiedSignedDeviceBuild: false,
             accountStatus: {
                 await probe.recordCall()
                 return .available
             }
         )
 
-        await #expect(throws: CloudAccountStatusError.missingEntitlement) {
+        await #expect(throws: CloudAccountStatusError.unsignedOrUnverifiedBuild) {
             _ = try await client.fetch()
         }
         #expect(await probe.calls == 0)
     }
 
-    @Test func appliedRequiredContainerAllowsCloudKitAccountLookup() async throws {
+    @Test func verifiedSignedDeviceBuildUsesTheInjectedPublicAccountLookup() async throws {
         let probe = AccountLookupProbe()
-        let client = CloudAccountStatusClient.guarded(
-            cloudKitEntitlement: {
-                .containers(["iCloud.com.msebilly.wisewalk"])
-            },
+        let client = CloudAccountStatusClient.livePolicy(
+            isVerifiedSignedDeviceBuild: true,
             accountStatus: {
                 await probe.recordCall()
                 return .available
@@ -166,6 +150,21 @@ struct CloudAccountStatusTests {
 
         #expect(try await client.fetch() == .available)
         #expect(await probe.calls == 1)
+    }
+
+    @Test func publicAccountLookupFailureBecomesAnExplicitClientError() async {
+        let client = CloudAccountStatusClient.livePolicy(
+            isVerifiedSignedDeviceBuild: true,
+            accountStatus: {
+                throw AccountLookupFailure.offline
+            }
+        )
+
+        await #expect(throws: CloudAccountStatusError.accountLookupFailed(
+            reason: "无法连接账户服务"
+        )) {
+            _ = try await client.fetch()
+        }
     }
 
     @MainActor

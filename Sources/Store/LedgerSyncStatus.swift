@@ -61,7 +61,7 @@ enum LedgerSyncStatus: Equatable, Sendable {
         case .checking:
             "正在检查 iCloud 可用性"
         case .available:
-            "iCloud 可用 · 记录将备份到 iCloud"
+            "iCloud 账户可用"
         case .noAccount:
             "记录目前只在这台设备上 · 未登录 iCloud"
         case .restricted:

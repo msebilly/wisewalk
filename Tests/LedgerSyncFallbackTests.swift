@@ -188,7 +188,7 @@ struct 同步状态Tests {
     @Test func 状态栏每一档都只说对应的事实() {
         let 每一档: [(LedgerSyncStatus, String)] = [
             (.checking, "正在检查 iCloud 可用性"),
-            (.available, "iCloud 可用 · 记录将备份到 iCloud"),
+            (.available, "iCloud 账户可用"),
             (.noAccount, "记录目前只在这台设备上 · 未登录 iCloud"),
             (.restricted, "记录目前只在这台设备上 · iCloud 账户受限"),
             (.couldNotDetermine, "记录目前只在这台设备上 · 无法确定 iCloud 账户状态"),
