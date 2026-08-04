@@ -1,0 +1,12 @@
+# 10 —— 远端设备名必须出现在补记页那一笔流水自己的 metadata 上。
+#
+# driver 先用真实 UI 记 1 声，终止 App 后只改那笔的持久化 deviceName，再跑本 flow。
+# 这是 SQLite seed 的 UI 接线测试，不是 CloudKit 跨设备传输测试。
+appId: com.msebilly.wisewalk
+---
+- launchApp: { clearState: false }
+- tapOn: { point: "10%,10%" }
+- assertVisible: "补记"
+- assertVisible: "+1 声"
+# 把来源和设备名钉在同一个 metadata Text，不能靠别处碰巧出现 marker 而假绿。
+- assertVisible: "[0-9]{2}:[0-9]{2} · 计数器 · iPad·X7QP"

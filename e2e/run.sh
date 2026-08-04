@@ -84,8 +84,8 @@ failed=0
 # `flows/[0-9]*.yaml` 而不是 `flows/*.yaml`：subflows/ 里的不是独立 flow。
 for f in flows/[0-9]*.yaml; do
   name="$(basename "$f")"
-  # 03 / 06 得先有草稿才有意义，裸跑必然失败。它们由下面各自的脚本驱动。
-  case "$name" in 03-*|06-*) continue ;; esac
+  # 03 / 06 得先有草稿，10 得在两次启动之间改落盘字段；都由下面各自的脚本驱动。
+  case "$name" in 03-*|06-*|10-*) continue ;; esac
   if [ -n "$only" ]; then
     case "$name" in
       "$only"*) ;;
@@ -119,6 +119,10 @@ fi
 if [ -z "$only" ] || [ "${only#06}" != "$only" ]; then
   echo ""
   ./06-postpone.sh || failed=1
+fi
+if [ -z "$only" ] || [ "${only#10}" != "$only" ]; then
+  echo ""
+  ./10-remote-device.sh || failed=1
 fi
 
 echo ""

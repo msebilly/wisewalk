@@ -1,0 +1,10 @@
+# 只走真实界面记一笔 1 声流水。设备名由 driver 在 App 终止后写入，
+# setup 不预告最终断言的设备文案。
+appId: com.msebilly.wisewalk
+---
+- launchApp: { clearState: false }
+- tapOn: "念佛"
+- tapOn: { point: "50%,45%" }
+- tapOn: "结束并记录"
+- assertVisible: "1 声"
+- stopApp

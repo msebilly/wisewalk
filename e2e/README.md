@@ -30,7 +30,8 @@ make install-sim              # 编译并装进当前开着的模拟器
 ```
 
 03 得先把草稿造出来，所以它是个脚本（`03-recovery.sh`）而不是裸 flow，
-`run.sh` 会连它一起跑。
+`run.sh` 会连它一起跑。10 要在 App 两次启动之间改 SQLite，也由
+`10-remote-device.sh` 驱动。
 
 **不进 CI** —— 要真模拟器。合并前手动跑一遍，尤其是动过弹窗、输入框、
 导航的时候。
@@ -47,6 +48,7 @@ make install-sim              # 编译并装进当前开着的模拟器
 | `05-chinese-info` | 本机记的那些不必每行都报一遍机器名 | 流水那行小字里不许冒 `iPhone·XXXX` |
 | `07-timer` | 走时和今日两个数得分得出哪个是哪个 | 小号自报「今日」，且读屏软件拿得到两个数 |
 | `06-postpone-then-manual` | `837ebc1` | 推迟之后他自己补记过，再问时得说出账上已有的数（由 `06-postpone.sh` 驱动）|
+| `10-remote-device` | v3 `deviceName` 接线 | 另一台设备的名字显示在那笔流水的小字里（由 `10-remote-device.sh` 驱动）|
 
 ## 这张网真咬得住吗
 
@@ -57,6 +59,7 @@ make install-sim              # 编译并装进当前开着的模拟器
 | 把 `fe8aeb6` 退回去（`showRecovery = !pending.isEmpty`，从 true 又写成 true）| 03 在**答完第一份之后**红，脚本另报「还剩 1 份草稿没裁决」 |
 | 迁移页 `syncDial` 写 `hours*60+minutes`（当成分钟）| 04 红在 `已经记过以往累计 3 小时` |
 | `metaText` 去掉 `!= thisDevice`（本机记的也报机器名）| 05-chinese-info 红在 `.*iPhone.*` 竟然可见 |
+| 补记页不用 `EntryRow.metaText`、只画时间和来源 | 10 红在缺少 `iPad·X7QP`；DB 后置条件仍是 1 笔、1 声，证明红的是 UI 接线 |
 | 计时页删掉 `.accessibilityValue(...)` | 07-timer 红。**这一口专挑单元测试够不着的那一段**：`subtitleText` 是纯函数、单元测试钉得死，但「视图有没有真去调它」「读屏软件拿不拿得到」只有跑真机才知道 |
 | `accept/discard` 不刷新「账上已有的数」| 单元测试红（`这个数得跟着队头的那一份走`）|
 | 「那一笔要落的那天」换成「今天」| 单元测试红（`昨晚崩的今早问要摆昨天的账不是今天的`）|
@@ -66,6 +69,20 @@ make install-sim              # 编译并装进当前开着的模拟器
 断言挑「3 小时」而不是挑标签，这一步没白挑。
 
 改动这几条 flow 之后，请照样咬一口再信它。
+
+## 10 的边界：证明 UI 接线，不冒充 CloudKit
+
+`10-remote-device.sh` 先清状态、立一门计数课，再从真实计数器记 **1 声**。
+App 终止后，driver 在 `WiseWalk.store` 中精确找到这一笔，只把它的
+`ZDEVICENAME` 改为一个不可能误认的远端名字；必须正好更新 1 行。重启后进入
+「补记」，断言同一条 metadata 同时含「计数器」和远端设备名。最后再查库：
+仍须正好 1 笔、合计 1 声、1 个业务 ID，且原主键的数量、来源、设备名都没变。
+
+这证明两件事：`deviceName` 能从持久化记录读回来；补记/修正列表确实把它接到
+`EntryRow.metaText` 并画在对应流水上。它**不证明** CloudKit schema、订阅、合并、
+网络传输或两台真设备之间的同步；这里没有运行真实 CloudKit，只是趁 App 终止时
+seed 模拟器 SQLite。变异校验故意把该行退成只有时间/来源：flow 必须在
+`iPad·X7QP` 缺失处以非零码 RED；恢复当前渲染后才可 GREEN。
 
 ## ⚠️ 造草稿要把 `startedAt` 错开
 
