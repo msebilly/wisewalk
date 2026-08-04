@@ -45,6 +45,16 @@ import Foundation
     }
 }
 
+@MainActor
+@Test func 内存测试容器两条configuration都不同步() throws {
+    let container = try ModelContainerFactory.inMemory()
+
+    for cfg in container.configurations {
+        let 设置 = String(describing: cfg.cloudKitDatabase)
+        #expect(设置.contains("_none: true"), "\(cfg.name) 在内存测试里启用了 CloudKit：\(设置)")
+    }
+}
+
 /// 换开关不能把已经落盘的功课弄丢。
 ///
 /// ⚠️ **这条证不了 CloudKit 的迁移安全**（理由见文件头）。它证的是更窄的一件事：

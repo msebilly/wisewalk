@@ -19,14 +19,16 @@ final class AppEnvironment {
     @ObservationIgnored let items: PracticeItemStore
     @ObservationIgnored let drafts: DraftStore
     let settings: AppSettings
-    /// 账本这条路通没通。**只报路，不报货**（见 `LedgerSyncStatus`）。
-    @ObservationIgnored let syncStatus: LedgerSyncStatus
+    /// 账本路径与 iCloud 账户状态。它会随账户变更刷新，但不声称同步已经完成。
+    let syncStatus: LedgerSyncStatusMonitor
 
     init(container: ModelContainer,
          defaults: UserDefaults = .standard,
-         syncStatus: LedgerSyncStatus = .localOnly(reason: nil)) throws {
+         syncStatus: LedgerSyncStatusMonitor? = nil) throws {
         self.container = container
-        self.syncStatus = syncStatus
+        self.syncStatus = syncStatus ?? LedgerSyncStatusMonitor(
+            status: .localOnly(reason: nil)
+        )
         let ctx = ModelContext(container)
         self.context = ctx
         let ledger = DayLedger(context: ctx, deviceName: DeviceIdentity.displayName(defaults: defaults))

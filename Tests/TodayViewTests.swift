@@ -25,7 +25,8 @@ import Foundation
     let env = try AppEnvironment(container: ModelContainerFactory.inMemory(),
                                  defaults: UserDefaults(suiteName: "test.\(UUID().uuidString)")!)
     _ = TodayView(vm: TodayViewModel(ledger: env.ledger, items: env.items),
-                  settings: env.settings, path: .constant(NavigationPath()))
+                  settings: env.settings, path: .constant(NavigationPath()),
+                  syncStatus: env.syncStatus)
 }
 
 @MainActor

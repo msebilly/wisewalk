@@ -6,6 +6,7 @@
   `project.yml` 里 `CODE_SIGNING_ALLOWED: NO`，而 entitlements 只在**签名那一刻**
   才被读取。本机只有一张 Apple Development 证书、没有 provisioning profile，
   CloudKit capability 需要付费开发者账号（$99/年）。
+  这些 entitlements 在没有付费账号的条件下**从未被实际执行或验证**。
 
   实测过缺这个文件时会发生什么：`cloudKitDatabase: .automatic` 是**彻底的空操作**——
   容器照样建得起、不抛错，库文件里连一张 CloudKit 特征表都不会多。

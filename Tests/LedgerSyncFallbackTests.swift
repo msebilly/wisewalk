@@ -29,6 +29,17 @@ struct 账本降级Tests {
     }
 
     @MainActor
+    @Test func 生产入口默认要求走iCloud() throws {
+        var 要过的路: [LedgerSync] = []
+        _ = try ModelContainerFactory.openLedger { sync in
+            要过的路.append(sync)
+            return try self.随便一个容器()
+        }
+
+        #expect(要过的路 == [.iCloud], "生产默认没有请求 iCloud：\(要过的路)")
+    }
+
+    @MainActor
     @Test func iCloud开不出来就退回只留本机而不是崩掉() throws {
         struct 开不出来: Error {}
         var 要过的路: [LedgerSync] = []
@@ -44,7 +55,7 @@ struct 账本降级Tests {
     }
 
     /// ⛔ 降级本身不可怕，**闷声降级才可怕**。
-    /// 这个理由要一路交到界面上（`LedgerSyncStatus.notice`）。
+    /// 这个理由要一路交到界面上（`LedgerSyncStatus.barText`）。
     @MainActor
     @Test func 降级的理由不许丢() throws {
         struct 容器ID对不上: Error {}
@@ -85,6 +96,51 @@ struct 账本降级Tests {
         }
     }
 
+    @MainActor
+    @Test func 降级后仍从同一落盘账本读到原记录() throws {
+        struct iCloud开不了: Error {}
+        let base = URL.temporaryDirectory.appending(
+            path: "wisewalk-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+        defer { try? FileManager.default.removeItem(at: base) }
+        let sessionID = UUID()
+
+        try {
+            let ctx = ModelContext(try ModelContainerFactory.onDisk(
+                baseDirectory: base,
+                ledgerSync: .thisDeviceOnly
+            ))
+            let item = PracticeItem(name: "念佛", measureType: .count, unit: "声")
+            ctx.insert(item)
+            ctx.insert(PracticeSession(
+                id: sessionID,
+                item: item,
+                dayKey: 20260803,
+                tzOffsetMinutes: 480,
+                amount: 108,
+                startedAt: Date(),
+                source: .counter,
+                deviceName: "T"
+            ))
+            try ctx.save()
+        }()
+
+        let opened = try ModelContainerFactory.openLedger(
+            baseDirectory: base,
+            requested: .iCloud
+        ) { sync in
+            if sync == .iCloud { throw iCloud开不了() }
+            return try ModelContainerFactory.onDisk(baseDirectory: base, ledgerSync: sync)
+        }
+        let ctx = ModelContext(opened.container)
+        let sessions = try ctx.fetch(FetchDescriptor<PracticeSession>())
+
+        #expect(opened.sync == .thisDeviceOnly)
+        #expect(sessions.map(\.id) == [sessionID], "降级换了库或改了原记录")
+        #expect(sessions.first?.amount == 108, "降级改动了原记录")
+    }
+
     /// ⛔ Swift 的默认值表达式引用不到同一个签名里的别的参数。
     /// `open` 那个参数一旦写成带默认闭包的形式，`baseDirectory` 就会被默默吞掉，
     /// 测试指着临时目录、实现却往真的 Application Support 里写。
@@ -102,14 +158,14 @@ struct 账本降级Tests {
     }
 }
 
-/// 同步状态只报**路通不通**，不报**货到没到**。
+/// 同步状态只报我们确知的事，不报**货到没到**。
 struct 同步状态Tests {
 
     @MainActor
-    @Test func 走iCloud且没降级才算路通() throws {
+    @Test func 走iCloud且没降级时先进入检查中() throws {
         let c = try ModelContainerFactory.inMemory()
-        let 通 = LedgerSyncStatus(LedgerOpen(container: c, sync: .iCloud, fallbackReason: nil))
-        #expect(通 == .pathOpen)
+        let 状态 = LedgerSyncStatus(LedgerOpen(container: c, sync: .iCloud, fallbackReason: nil))
+        #expect(状态 == .checking)
     }
 
     @MainActor
@@ -126,16 +182,28 @@ struct 同步状态Tests {
         let 本机 = LedgerSyncStatus(LedgerOpen(container: c, sync: .thisDeviceOnly,
                                               fallbackReason: nil))
         #expect(本机 == .localOnly(reason: nil))
-        #expect(本机.notice == nil, "没要求同步却在屏幕上报警")
+        #expect(本机.barText == "记录目前只在这台设备上 · 未启用 iCloud")
     }
 
-    /// ⛔ 本产品最怕的形状是「看起来在同步，其实没有」。
-    /// 降级了就必须说出来，而且要说清「只在这台设备上」。
-    @Test func 降级了必须在屏幕上说出来() {
-        let 话 = LedgerSyncStatus.localOnly(reason: "任意错因").notice
-        let 说了什么 = try! #require(话, "闷声降级——这正是本产品最怕的那件事")
-        #expect(说了什么.contains("只存在这台设备上"), "没说清记录在哪儿：\(说了什么)")
-        #expect(说了什么.contains("iCloud"), "没说清它没到哪儿去：\(说了什么)")
+    @Test func 状态栏每一档都只说对应的事实() {
+        let 每一档: [(LedgerSyncStatus, String)] = [
+            (.checking, "正在检查 iCloud 可用性"),
+            (.available, "iCloud 可用 · 记录将备份到 iCloud"),
+            (.noAccount, "记录目前只在这台设备上 · 未登录 iCloud"),
+            (.restricted, "记录目前只在这台设备上 · iCloud 账户受限"),
+            (.couldNotDetermine, "记录目前只在这台设备上 · 无法确定 iCloud 账户状态"),
+            (.temporarilyUnavailable, "记录目前只在这台设备上 · iCloud 暂时不可用"),
+            (.accountLookupFailed(reason: "无法连接账户服务"),
+             "记录目前只在这台设备上 · 无法查询 iCloud 账户"),
+            (.localOnly(reason: "容器 ID 对不上"),
+             "记录目前只在这台设备上 · iCloud 数据库未能打开"),
+            (.localOnly(reason: nil),
+             "记录目前只在这台设备上 · 未启用 iCloud")
+        ]
+
+        for (状态, 事实) in 每一档 {
+            #expect(状态.barText == 事实, "\(状态) 说成了：\(状态.barText)")
+        }
     }
 
     /// ⛔⛔ **绝不许承诺「已备份 / 已同步」。**
@@ -147,13 +215,17 @@ struct 同步状态Tests {
     ///
     /// 这条钉的是一整族词，不是某一句文案：谁哪天想「顺手把状态做得完整点」，
     /// 都会在这里被拦下来。
-    @Test func 路通着的时候一个字都不许说而且永远不许说已备份() throws {
-        #expect(LedgerSyncStatus.pathOpen.notice == nil, "可用时不打扰（§5.1）")
-
-        let 不许出现 = ["已备份", "已同步", "同步完成", "备份完成", "刚刚同步",
-                     "待上传", "上次同步", "已上传", "安全", "已保存到 iCloud"]
-        for 状态 in [LedgerSyncStatus.pathOpen, .localOnly(reason: nil), .localOnly(reason: "x")] {
-            let 话 = 状态.notice ?? ""
+    @Test func 任何一档都不许出现无法证实的词族() {
+        let 不许出现 = ["已备份", "已同步", "同步完成", "备份完成", "刚刚",
+                     "待上传", "上次同步", "已上传", "安全", "已保存到 iCloud",
+                     "同步已开启", "备份已开启"]
+        let 每一档: [LedgerSyncStatus] = [
+            .checking, .available, .noAccount, .restricted, .couldNotDetermine,
+            .temporarilyUnavailable, .accountLookupFailed(reason: "任意错因"),
+            .localOnly(reason: nil), .localOnly(reason: "任意错因")
+        ]
+        for 状态 in 每一档 {
+            let 话 = 状态.barText
             for 词 in 不许出现 {
                 #expect(!话.contains(词),
                         "\(状态) 说了「\(词)」——我们根本不知道同步到哪一步了：\(话)")

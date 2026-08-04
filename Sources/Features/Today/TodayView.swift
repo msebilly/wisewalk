@@ -5,6 +5,14 @@ struct TodayView: View {
     @Bindable var vm: TodayViewModel
     let settings: AppSettings
     @Binding var path: NavigationPath
+    /// 底部那条常驻状态说什么，由它决定。
+    ///
+    /// ⛔ **故意不给默认值。** 视图层接线在本仓库零测试覆盖（八次变异实测），
+    /// 而这条线一旦漏接，屏幕会照常显示「数据保存在本机」——
+    /// 与「一切正常」那一档一模一样，**看不出来，也测不出来**。
+    /// 不给默认值，编译器就替这根线站了岗；这是本卷对付视图层空洞
+    /// 唯一有效的办法（结构性，不是覆盖）。
+    let syncStatus: LedgerSyncStatusMonitor
 
     @Environment(\.theme) private var theme
     @Environment(\.scenePhase) private var scenePhase
@@ -53,7 +61,7 @@ struct TodayView: View {
             .padding(.top, 8)
             .padding(.bottom, 24)
         }
-        .safeAreaInset(edge: .bottom) { BackupStatusBar() }
+        .safeAreaInset(edge: .bottom) { BackupStatusBar(status: syncStatus.status) }
         .navigationTitle("今日")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -194,22 +202,29 @@ struct TodayView: View {
 
 /// §6.1 底部常驻备份状态。
 ///
-/// 本卷 CloudKit 尚未开启，所以这里说的是**实话**：数据只在这台设备上。
-/// 第 3 卷接上真实同步状态后替换文案。
+/// **说什么由 `LedgerSyncStatus` 一处说了算**——第 3 卷之前这里写死
+/// 「数据保存在本机」，注释里留着「接上真实同步状态后替换文案」。
+/// 现在接上了，但接上的是**我们真正知道的那点事**，不是原稿要的
+/// 「已备份 · 刚刚 / 有 2 条待上传」（§5.2 已定案：那三句一句都说不出口）。
+///
 /// 宁可现在说得保守，也不能让用户以为已经有备份了——
 /// 这个 App 唯一不能违背的承诺就是「不弄丢你的功课」。
 struct BackupStatusBar: View {
+    let status: LedgerSyncStatus
     @Environment(\.theme) private var theme
 
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "iphone")
-            Text("数据保存在本机")
+            Text(status.barText)
         }
         .font(.footnote)
         .foregroundStyle(theme.secondaryText)
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
         .background(.ultraThinMaterial)
+        // 图标是装饰，读屏软件念一遍「iphone」没有意义。
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(status.barText)
     }
 }

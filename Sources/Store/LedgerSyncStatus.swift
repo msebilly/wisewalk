@@ -1,4 +1,20 @@
 import Foundation
+import CloudKit
+import Observation
+
+private final class NotificationObserverToken: @unchecked Sendable {
+    private let notificationCenter: NotificationCenter
+    private let token: NSObjectProtocol
+
+    init(notificationCenter: NotificationCenter, token: NSObjectProtocol) {
+        self.notificationCenter = notificationCenter
+        self.token = token
+    }
+
+    deinit {
+        notificationCenter.removeObserver(token)
+    }
+}
 
 /// 账本同步这件事上，**我们真正知道的那点事**。
 ///
@@ -15,13 +31,15 @@ import Foundation
 /// 换手机时才发现什么都没有。这个 App 的立身之本是「一声都不能丢」，
 /// 而**说不知道的事，比不说更坏**——闭口至少不会让人误以为安全。
 ///
-/// 所以这里只报**路通不通**，不报**货到没到**。
-enum LedgerSyncStatus: Equatable {
-    /// 账本按要求走 iCloud，路开出来了。
-    ///
-    /// ⛔ **这不等于「已经同步好了」。** 容器开成功之后 CloudKit 还可能
-    /// 因为没登录 iCloud、没网、配额满而一条都传不上去，而我们看不见。
-    case pathOpen
+/// 所以这里只报**路径与账户是否可用**，不报**货到没到**。
+enum LedgerSyncStatus: Equatable, Sendable {
+    case checking
+    case available
+    case noAccount
+    case restricted
+    case couldNotDetermine
+    case temporarilyUnavailable
+    case accountLookupFailed(reason: String)
 
     /// 记录只在这台设备上。
     /// - Parameter reason: 降级的原因；`nil` 表示本来就没要求同步（不是出错）。
@@ -29,24 +47,99 @@ enum LedgerSyncStatus: Equatable {
 
     init(_ opened: LedgerOpen) {
         switch (opened.sync, opened.fallbackReason) {
-        case (.iCloud, nil): self = .pathOpen
+        case (.iCloud, nil): self = .checking
         case (_, let why): self = .localOnly(reason: why)
         }
     }
 
-    /// 要不要在今日页说话，说什么。**`nil` = 一个字都不说。**
-    ///
-    /// 「可用时不打扰」（§5.1）：路通着就闭嘴。真正非说不可的只有一种——
-    /// **我们承诺过记录在 iCloud 里，而它此刻不在**。§5.3 说得明白，
-    /// 「只有一台设备、没登 iCloud」恰恰是最危险的用户。
+    /// 底部那条常驻状态说什么（§6.1 要求它**常驻**，所以永远有话说）。
     ///
     /// 只陈述事实，不出主意（同 `RecoveryCoordinator.alreadyOnBooks`）：
     /// 用户是该去登 iCloud、还是该导出备份、还是根本不在乎，我们不知道。
-    var notice: String? {
+    var barText: String {
         switch self {
-        case .pathOpen: nil
-        case .localOnly(nil): nil
-        case .localOnly(.some): "记录目前只存在这台设备上，没有传到 iCloud。"
+        case .checking:
+            "正在检查 iCloud 可用性"
+        case .available:
+            "iCloud 可用 · 记录将备份到 iCloud"
+        case .noAccount:
+            "记录目前只在这台设备上 · 未登录 iCloud"
+        case .restricted:
+            "记录目前只在这台设备上 · iCloud 账户受限"
+        case .couldNotDetermine:
+            "记录目前只在这台设备上 · 无法确定 iCloud 账户状态"
+        case .temporarilyUnavailable:
+            "记录目前只在这台设备上 · iCloud 暂时不可用"
+        case .accountLookupFailed:
+            "记录目前只在这台设备上 · 无法查询 iCloud 账户"
+        case .localOnly(.some):
+            "记录目前只在这台设备上 · iCloud 数据库未能打开"
+        case .localOnly(nil):
+            "记录目前只在这台设备上 · 未启用 iCloud"
+        }
+    }
+}
+
+@MainActor
+@Observable
+final class LedgerSyncStatusMonitor {
+    private(set) var status: LedgerSyncStatus
+
+    @ObservationIgnored private let accountClient: CloudAccountStatusClient
+    @ObservationIgnored private let notificationCenter: NotificationCenter
+    @ObservationIgnored private var accountChangeObserver: NotificationObserverToken?
+    @ObservationIgnored private let usesICloud: Bool
+    @ObservationIgnored private var refreshGeneration = 0
+
+    init(status: LedgerSyncStatus) {
+        self.status = status
+        self.accountClient = CloudAccountStatusClient { .couldNotDetermine }
+        self.notificationCenter = NotificationCenter()
+        self.usesICloud = false
+    }
+
+    init(opened: LedgerOpen,
+         accountClient: CloudAccountStatusClient = .live,
+         notificationCenter: NotificationCenter = .default) {
+        self.accountClient = accountClient
+        self.notificationCenter = notificationCenter
+        self.usesICloud = opened.sync == .iCloud && opened.fallbackReason == nil
+        self.status = usesICloud ? .checking : LedgerSyncStatus(opened)
+
+        guard usesICloud else { return }
+        let token = notificationCenter.addObserver(
+            forName: .CKAccountChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.refresh()
+            }
+        }
+        accountChangeObserver = NotificationObserverToken(
+            notificationCenter: notificationCenter,
+            token: token
+        )
+    }
+
+    func refresh() async {
+        guard usesICloud else { return }
+        refreshGeneration += 1
+        let generation = refreshGeneration
+        status = .checking
+        do {
+            let availability = try await accountClient.fetch()
+            guard generation == refreshGeneration else { return }
+            switch availability {
+            case .available: status = .available
+            case .noAccount: status = .noAccount
+            case .restricted: status = .restricted
+            case .couldNotDetermine: status = .couldNotDetermine
+            case .temporarilyUnavailable: status = .temporarilyUnavailable
+            }
+        } catch {
+            guard generation == refreshGeneration else { return }
+            status = .accountLookupFailed(reason: error.localizedDescription)
         }
     }
 }

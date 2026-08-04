@@ -14,8 +14,9 @@ struct WiseWalkApp: App {
             // 而那条路的尽头是**App 根本起不来**。
             // `openLedger` 会退回只留本机并带回降级理由，见它的长注释。
             let opened = try ModelContainerFactory.openLedger()
+            let syncStatus = LedgerSyncStatusMonitor(opened: opened)
             _env = State(initialValue: try AppEnvironment(container: opened.container,
-                                                          syncStatus: LedgerSyncStatus(opened)))
+                                                          syncStatus: syncStatus))
         } catch {
             // 数据库打不开意味着用户看不到自己的功课。
             // 此处不做静默降级——降级会让人以为记录丢了，比崩溃更伤。
