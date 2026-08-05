@@ -19,9 +19,16 @@ final class AppEnvironment {
     @ObservationIgnored let items: PracticeItemStore
     @ObservationIgnored let drafts: DraftStore
     let settings: AppSettings
+    /// 账本路径与 iCloud 账户状态。它会随账户变更刷新，但不声称同步已经完成。
+    let syncStatus: LedgerSyncStatusMonitor
 
-    init(container: ModelContainer, defaults: UserDefaults = .standard) throws {
+    init(container: ModelContainer,
+         defaults: UserDefaults = .standard,
+         syncStatus: LedgerSyncStatusMonitor? = nil) throws {
         self.container = container
+        self.syncStatus = syncStatus ?? LedgerSyncStatusMonitor(
+            status: .localOnly(reason: nil)
+        )
         let ctx = ModelContext(container)
         self.context = ctx
         let ledger = DayLedger(context: ctx, deviceName: DeviceIdentity.displayName(defaults: defaults))

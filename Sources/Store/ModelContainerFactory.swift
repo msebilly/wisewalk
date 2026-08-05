@@ -88,6 +88,10 @@ enum ModelContainerFactory {
     /// `baseDirectory` 有默认值，生产调用处不必传；开个口子是为了让测试
     /// 能指向临时目录，从而真正验证「草稿库确实落在被排除的子目录里」——
     /// 只测 `excludeFromBackup` 这个函数本身，证明不了 `onDisk` 真的调了它。
+    ///
+    /// ⚠️ `ledgerSync` 的默认值 `.thisDeviceOnly` 是**给测试用的保守值**，
+    /// 不是生产口径。**生产走哪条由 `openLedger` 一处说了算**——
+    /// 别在别处直接调 `onDisk()` 然后以为它会同步（自查 ㉒：同一个判断别写两遍）。
     static func onDisk(baseDirectory: URL = URL.applicationSupportDirectory,
                        ledgerSync: LedgerSync = .thisDeviceOnly) throws -> ModelContainer {
         let localDir = baseDirectory.appending(path: "LocalOnly", directoryHint: .isDirectory)
@@ -105,5 +109,63 @@ enum ModelContainerFactory {
                                    url: localDir.appendingPathComponent("WiseWalkLocal.store"),
                                    cloudKitDatabase: .none)
         )
+    }
+}
+
+/// 账本库开出来之后，实际落到了哪条路上。
+///
+/// `fallbackReason` 非 nil 就是降级了——**这个值必须一路交到界面上**，
+/// 降级本身不可怕，闷声降级才可怕（见 `openLedger`）。
+struct LedgerOpen {
+    let container: ModelContainer
+    /// 实际用上的那个，**不一定是要求的那个**。
+    let sync: LedgerSync
+    /// 为什么没走成 iCloud。nil = 按要求开的。
+    let fallbackReason: String?
+}
+
+extension ModelContainerFactory {
+    /// 生产唯一的账本入口：**要求走 iCloud；打不开就退回只留本机，不崩。**
+    ///
+    /// ⛔ 这是为了拆掉 `WiseWalkApp` 那颗定时炸弹。从前那里是
+    /// `try onDisk()` 配 `fatalError`，而 `onDisk` 从前永远只留本机、
+    /// 几乎不可能失败。拨到 iCloud 之后失败的门路一下子多了起来
+    /// （容器 ID 对不上、schema 违反 CloudKit 约束、iCloud 被 MDM 关掉…），
+    /// 而那条路的尽头是**App 根本起不来**——用户连自己念了多少都看不到。
+    ///
+    /// **为什么这里允许降级，而「数据库整个打不开」时不允许**（`WiseWalkApp` 的注释）：
+    /// 那一次降级会让用户以为记录丢了，他看到的是一个空 App；
+    /// **这一次降级一个字节都不动**——同一个 store 文件、同一批流水，只是不往 iCloud 走。
+    /// 两害相权，降级轻得多。
+    ///
+    /// **但绝不许闷声降级。** 理由带在 `fallbackReason` 里交给界面。
+    /// 本产品最怕的形状就是「看起来在同步，其实没有」。
+    ///
+    /// ⚠️ 这道网**只接得住「容器压根打不开」**。容器开成功、CloudKit 事后才失败
+    /// （没登录 iCloud、没网、配额满）的那些，这里一概看不见——
+    /// 那部分交给 `LedgerSyncStatus`，而它也只报得出「路通不通」，报不出「货到没到」。
+    ///
+    /// - Parameter open: 只为测试注入失败。生产不传。
+    static func openLedger(
+        baseDirectory: URL = URL.applicationSupportDirectory,
+        requested: LedgerSync = .iCloud,
+        // ⛔ 不能写成 `open: (LedgerSync) throws -> ModelContainer = { try onDisk(baseDirectory: baseDirectory, ...) }`
+        // ——Swift 的默认值表达式引用不到同一个签名里的别的参数，
+        // 只能写死 `URL.applicationSupportDirectory`，于是**传进来的 `baseDirectory` 被默默吞掉**，
+        // 测试指着临时目录、实现却往真的 Application Support 里写。
+        // 这就是 ⑬「断言的尺子和实现不是同一把」的反面：参数根本没接上。
+        open: ((LedgerSync) throws -> ModelContainer)? = nil
+    ) throws -> LedgerOpen {
+        let open = open ?? { try onDisk(baseDirectory: baseDirectory, ledgerSync: $0) }
+        do {
+            return LedgerOpen(container: try open(requested), sync: requested, fallbackReason: nil)
+        } catch {
+            // 本来就只留本机的话，没有第二条路可退——如实抛出去，
+            // 这才是 `WiseWalkApp` 那个 `fatalError` 真正该管的那种失败。
+            guard requested != .thisDeviceOnly else { throw error }
+            return LedgerOpen(container: try open(.thisDeviceOnly),
+                              sync: .thisDeviceOnly,
+                              fallbackReason: "\(error)")
+        }
     }
 }

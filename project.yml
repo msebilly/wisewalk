@@ -35,6 +35,13 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         CODE_SIGN_STYLE: Automatic
         CODE_SIGNING_ALLOWED: NO
+        # ⛔ 这行在本机上不产生任何效果——entitlements 只在**签名那一刻**被读，
+        # 而上一行把签名整个关了。它进仓库是为了付费账号到位那天不用现补，
+        # 以及把「容器 ID 是什么」写在一个查得到的地方。
+        # 文件头有更长的说明：这些 entitlements 在没有付费账号时从未实际执行；
+        # iOS 没有公开 API 能在运行时检查它们是否已应用，也不使用私有 SPI 猜测。
+        # 真机验证之前，任何「同步已就绪」的说法都是编的。
+        CODE_SIGN_ENTITLEMENTS: WiseWalk.entitlements
         TARGETED_DEVICE_FAMILY: "1,2"
 
   WiseWalkTests:

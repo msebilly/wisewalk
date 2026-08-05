@@ -25,7 +25,32 @@ import Foundation
     let env = try AppEnvironment(container: ModelContainerFactory.inMemory(),
                                  defaults: UserDefaults(suiteName: "test.\(UUID().uuidString)")!)
     _ = TodayView(vm: TodayViewModel(ledger: env.ledger, items: env.items),
-                  settings: env.settings, path: .constant(NavigationPath()))
+                  settings: env.settings, path: .constant(NavigationPath()),
+                  syncStatus: env.syncStatus)
+}
+
+struct TodaySyncStatusTests {
+    @MainActor
+    @Test func 底部状态栏与读屏只陈述账户不可用或当前本地路径() {
+        let 每一档: [(LedgerSyncStatus, String)] = [
+            (.noAccount, "这台设备目前无法使用 iCloud · 未登录 iCloud"),
+            (.restricted, "这台设备目前无法使用 iCloud · iCloud 账户受限"),
+            (.couldNotDetermine, "无法确定 iCloud 账户状态"),
+            (.temporarilyUnavailable, "iCloud 暂时不可用"),
+            (.unverifiedBuild, "当前构建未验证 iCloud 能力"),
+            (.accountLookupFailed(reason: "账户服务超时"),
+             "iCloud 账户查询失败 · 状态未知"),
+            (.localOnly(reason: "数据库打不开"),
+             "当前使用本地账本 · iCloud 数据库未能打开"),
+            (.localOnly(reason: nil), "当前使用本地账本 · 未启用 iCloud")
+        ]
+
+        for (状态, 事实) in 每一档 {
+            _ = BackupStatusBar(status: 状态)
+            #expect(状态.barText == 事实,
+                    "BackupStatusBar 的可见文字与 accessibilityLabel 都从 barText 读取")
+        }
+    }
 }
 
 @MainActor

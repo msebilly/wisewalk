@@ -1,0 +1,16 @@
+# 只走真实界面记一笔 1 声流水，并在 seed 前从同一个补记/修正页证明：
+# 本机流水已经可见，而远端 marker 还没有出现。
+appId: com.msebilly.wisewalk
+---
+- launchApp: { clearState: false }
+- tapOn: "念佛"
+- tapOn: { point: "50%,45%" }
+- tapOn: "结束并记录"
+- assertVisible: "1 声"
+- tapOn: { point: "10%,10%" }
+- assertVisible: "补记"
+- assertVisible: "+1 声"
+- assertNotVisible: "iPad·X7QP"
+# 回到今日再由 driver 终止；别把 App 留在读取数据库的补记页上。
+- tapOn: { point: "10%,10%" }
+- assertVisible: "今日"

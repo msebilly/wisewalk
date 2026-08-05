@@ -4,6 +4,25 @@ import Foundation
 @testable import WiseWalk
 
 @MainActor
+@Test func 装配保留可刷新的同步状态而不是一张启动快照() async throws {
+    let container = try ModelContainerFactory.inMemory()
+    let monitor = LedgerSyncStatusMonitor(
+        opened: LedgerOpen(container: container, sync: .iCloud, fallbackReason: nil),
+        accountClient: CloudAccountStatusClient { .available },
+        notificationCenter: NotificationCenter()
+    )
+    let env = try AppEnvironment(
+        container: container,
+        defaults: UserDefaults(suiteName: "test.\(UUID().uuidString)")!,
+        syncStatus: monitor
+    )
+
+    #expect(env.syncStatus === monitor)
+    await monitor.refresh()
+    #expect(env.syncStatus.status == .available)
+}
+
+@MainActor
 @Test func 装配后三个仓储共用同一个上下文() throws {
     // 不共用的话，A 存的东西 B 查不到——SwiftData 的 ModelContext 各有各的待写缓冲。
     let env = try AppEnvironment(container: ModelContainerFactory.inMemory(),

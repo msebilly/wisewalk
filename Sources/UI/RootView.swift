@@ -68,7 +68,8 @@ struct RootView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            TodayView(vm: today, settings: env.settings, path: $path)
+            TodayView(vm: today, settings: env.settings, path: $path,
+                      syncStatus: env.syncStatus)
                 // 清算没走完就不放行。`.disabled` 只加在这里，
                 // 弹窗挂在外层的 NavigationStack 上——加在被禁用的子树里，
                 // 连「记上」按钮都会点不动。
@@ -80,6 +81,7 @@ struct RootView: View {
         }
         .themed()
         .task { runRecovery() }
+        .task { await env.syncStatus.refresh() }
         // 待裁决的草稿逐个问。一次问一份，问得清楚，也免得用户为了关掉弹窗胡乱点。
         // 三个按钮一个都不能少：**只写两个的话 SwiftUI 会自己补第三个**，
         // 标题是系统英文 `Cancel`、action 是空的，点下去就把界面锁死（见 `postpone()`）。
